@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IFC WebGL Viewer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  
+  <div id="hud" class="hud">
+    <div class="stats">
+      <div>FPS: <span id="fps">0</span></div>
+      <div>Latency: <span id="latency">0</span>ms</div>
+      <div>User ID: <span id="userId">--</span></div>
+    </div>
+    
+    <div class="controls">
+      <h3>Controls</h3>
+      <p><strong>Movement:</strong> Arrow Keys or WASD</p>
+      <p><strong>Look:</strong> Click canvas, then move mouse</p>
+      <p><strong>Exit Look:</strong> Press ESC</p>
+    </div>
+    
+    <div class="status">
+      <div id="connectionStatus" class="status-disconnected">● Disconnected</div>
+    </div>
+  </div>
+  
+  <script src="client.js"></script>
+</body>
+</html>
