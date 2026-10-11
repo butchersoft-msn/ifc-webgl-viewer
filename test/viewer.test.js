@@ -20,6 +20,13 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
   assert.ok(json.meshes.length > 0);
   assert.equal(json.buffers[0].uri, undefined);
   assert.equal(json.images, undefined);
+  // Pad the BIN chunk beyond the 100 MiB DevTools limit after base64 encoding.
+  const modelSize = 80 * 1024 * 1024;
+  const binOffset = 20 + glb.readUInt32LE(12);
+  glb.writeUInt32LE(modelSize, 8);
+  glb.writeUInt32LE(modelSize - binOffset - 8, binOffset);
+  await fs.writeFile(modelPath, glb);
+  await fs.truncate(modelPath, modelSize);
   await assert.rejects(convert(fixture, modelPath), /EEXIST/);
   await assert.rejects(convert(fixture, path.join(__dirname, '../public/private.glb')), /outside public/);
   await assert.rejects(start({ host: '0.0.0.0', password: '', port: 0 }), /External hosting requires/);
@@ -32,7 +39,8 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
     await Promise.all(contexts.map(context => context.close()));
     await viewer.close();
   });
-  for (const route of ['/model.glb', '/model.ifc', '/renderer/renderer.js', '/node_modules/three/build/three.module.js', '/server.js', '/private/wall.glb']) {
+  for (const route of ['/model.glb', '/private-model', '/private-model?token=invalid', '/private-model?token=a&token=b',
+    '/model.ifc', '/renderer/renderer.js', '/node_modules/three/build/three.module.js', '/server.js', '/private/wall.glb']) {
     assert.equal((await fetch(viewer.origin + route)).status, 404, route);
   }
   const sessionRequest = (password, origin = viewer.origin) => fetch(`${viewer.origin}/session`, {
@@ -74,6 +82,19 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
   }
   assert.equal(viewer.sessions.size, 2);
   const sessions = [...viewer.sessions.values()];
+  assert.match(sessions[0].modelToken, /^[a-f0-9]{64}$/);
+  assert.notEqual(sessions[0].modelToken, sessions[1].modelToken);
+  for (const session of sessions) {
+    const result = await session.page.evaluate(async token => {
+      const response = await fetch(`/private-model?token=${encodeURIComponent(token)}`, {
+        headers: { Range: 'bytes=0-3' },
+      });
+      return { status: response.status, type: response.headers.get('Content-Type'), magic: await response.text() };
+    }, session.modelToken);
+    assert.deepEqual(result, { status: 206, type: 'model/gltf-binary', magic: 'glTF' });
+    assert.notDeepEqual(await session.page.evaluate(() => window.camera.position.toArray()),
+      [0, 2, 12], 'Model, not demo cube, loaded');
+  }
   // A delayed WebRTC candidate must not tear down an already-playing fallback.
   sessions[0].ws.send(JSON.stringify({ type: 'ice', candidate: {
     candidate: 'candidate:1 1 udp 1 127.0.0.1 12345 typ host', sdpMid: '0', sdpMLineIndex: 0,
@@ -91,6 +112,45 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
   await clients[0].close();
   await new Promise(resolve => setTimeout(resolve, 300));
   assert.equal(viewer.sessions.size, 1);
+  assert.equal((await fetch(`${viewer.origin}/private-model?token=${sessions[0].modelToken}`)).status, 404);
+  const activeModel = await fetch(`${viewer.origin}/private-model?token=${sessions[1].modelToken}`, {
+    headers: { Range: 'bytes=0-3' },
+  });
+  assert.equal(activeModel.status, 206);
+  assert.equal(activeModel.headers.get('Cache-Control'), 'no-store');
+  assert.equal(await activeModel.text(), 'glTF');
   for (let i = 0; i < 7; i++) await sessionRequest('wrong');
   assert.equal((await sessionRequest('wrong')).status, 429);
+});
+
+test('private model rejects remote peers and revokes replaced session tokens', { timeout: 120000 }, async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'private-endpoint-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const modelPath = path.join(directory, 'model.glb');
+  await fs.writeFile(modelPath, 'glTF');
+  const viewer = await start({ host: '0.0.0.0', port: 0, origin: 'https://viewer.example.com',
+    password: 'test-password', modelPath });
+  t.after(() => viewer.close());
+  const localOrigin = `http://127.0.0.1:${viewer.server.address().port}`;
+  const create = cookie => fetch(`${localOrigin}/session`, {
+    method: 'POST', headers: { Origin: viewer.origin, 'Content-Type': 'application/json', Cookie: cookie || '' },
+    body: JSON.stringify({ password: 'test-password' }),
+  });
+  const first = await create();
+  assert.equal(first.status, 200);
+  assert.deepEqual(await first.json(), { iceServers: [] });
+  const token = [...viewer.sessions.values()][0].modelToken;
+  const route = `/private-model?token=${token}`;
+  assert.equal(await (await fetch(localOrigin + route)).text(), 'glTF');
+  const remote = Object.values(os.networkInterfaces()).flat()
+    .find(address => address.family === 'IPv4' && !address.internal);
+  if (remote) {
+    assert.equal((await fetch(`http://${remote.address}:${viewer.server.address().port}${route}`, {
+      headers: { 'X-Forwarded-For': '127.0.0.1' },
+    })).status, 404);
+  } else {
+    t.diagnostic('No non-loopback IPv4 interface available for remote-peer check');
+  }
+  assert.equal((await create(first.headers.get('set-cookie').split(';')[0])).status, 200);
+  assert.equal((await fetch(localOrigin + route)).status, 404);
 });

@@ -40,10 +40,13 @@ async function start(options = {}) {
     if (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) {
       throw new Error('MODEL_PATH must be outside public');
     }
-    model = await fs.readFile(resolved);
-    if (path.extname(resolved).toLowerCase() !== '.glb' || model.toString('ascii', 0, 4) !== 'glTF') {
+    const handle = await fs.open(resolved, 'r');
+    const magic = Buffer.alloc(4);
+    try { await handle.read(magic, 0, 4, 0); } finally { await handle.close(); }
+    if (path.extname(resolved).toLowerCase() !== '.glb' || magic.toString('ascii') !== 'glTF') {
       throw new Error('MODEL_PATH must be a self-contained GLB; convert IFC first');
     }
+    model = resolved;
   }
   const browser = await puppeteer.launch({
     headless: true,
@@ -56,6 +59,7 @@ async function start(options = {}) {
   const server = http.createServer(app);
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16384 });
   const sessions = new Map();
+  const modelTokens = new Set();
   let origin;
   const assets = new Map([
     ['/index.html', [path.join(ROOT, 'renderer/index.html'), 'text/html']],
@@ -71,6 +75,7 @@ async function start(options = {}) {
     if (!session) return;
     sessions.delete(id);
     clearTimeout(session.timer);
+    modelTokens.delete(session.modelToken);
     session.ws?.close(1000, 'Session ended');
     await session.page?.close().catch(() => {});
   }
@@ -96,11 +101,19 @@ async function start(options = {}) {
     if (sessions.has(sessionId(req))) await remove(sessionId(req));
     if (sessions.size >= maxSessions) return res.status(503).json({ error: 'Viewer capacity reached' });
     const id = randomBytes(32).toString('hex');
-    const session = { page: null, ws: null };
+    const session = { page: null, ws: null, modelToken: model ? randomBytes(32).toString('hex') : null };
+    if (session.modelToken) modelTokens.add(session.modelToken);
     session.timer = setTimeout(() => void remove(id), SESSION_MS).unref();
     sessions.set(id, session);
     res.setHeader('Set-Cookie', `viewer=${id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600${origin.startsWith('https:') ? '; Secure' : ''}`);
     res.json({ iceServers });
+  });
+  // Private geometry travels over HTTP, never through the DevTools control channel.
+  app.get('/private-model', (req, res) => {
+    const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+    const token = typeof req.query.token === 'string' ? req.query.token : '';
+    if (!model || !loopback || !modelTokens.has(token)) return res.sendStatus(404);
+    res.sendFile(model, { headers: { 'Content-Type': 'model/gltf-binary' } });
   });
   // Only these three client assets are public, even if a model is misplaced.
   for (const file of ['index.html', 'client.js', 'styles.css']) {
@@ -160,9 +173,7 @@ async function start(options = {}) {
         void (async () => {
           const url = new URL(request.url());
           if (url.origin !== rendererOrigin) return request.abort();
-          if (url.pathname === '/model.glb' && model) {
-            return request.respond({ status: 200, contentType: 'model/gltf-binary', body: model });
-          }
+          if (url.pathname === '/private-model' && model) return request.continue();
           const asset = assets.get(url.pathname);
           if (!asset) return request.abort();
           await request.respond({ status: 200, contentType: asset[1], body: await fs.readFile(asset[0]) });
@@ -182,7 +193,8 @@ async function start(options = {}) {
       const error = await page.evaluate(() => window.rendererError);
       if (error) throw new Error(error);
       ready = true;
-      await page.evaluate(config => window.startStream(config), { iceServers, hasModel: !!model });
+      await page.evaluate(config => window.startStream(config),
+        { iceServers, hasModel: !!model, modelToken: session.modelToken });
     } catch (error) {
       console.error('Renderer session failed:', error.message);
       send({ type: 'error', message: 'Renderer failed. Check the server log.' });
@@ -197,7 +209,8 @@ async function start(options = {}) {
     });
   } catch (error) { await browser.close(); throw error; }
   origin = configuredOrigin || `http://${host === '::1' ? '[::1]' : host}:${server.address().port}`;
-  const rendererOrigin = `http://127.0.0.1:${server.address().port}`;
+  const rendererHost = ['::', '::1'].includes(host) ? '[::1]' : host === 'localhost' ? 'localhost' : '127.0.0.1';
+  const rendererOrigin = `http://${rendererHost}:${server.address().port}`;
   console.log(`Remote viewer: ${origin} (${model ? 'private GLB' : 'demo scene'})`);
   async function close() {
     await Promise.all([...sessions.keys()].map(remove));

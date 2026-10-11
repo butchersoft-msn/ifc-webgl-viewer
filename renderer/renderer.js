@@ -36,9 +36,9 @@ try {
     if (peer.remoteDescription) await peer.addIceCandidate(candidate);
     else pendingIce.push(candidate);
   };
-  window.startStream = async ({ iceServers, hasModel }) => {
+  window.startStream = async ({ iceServers, hasModel, modelToken }) => {
     if (hasModel) {
-      const gltf = await new GLTFLoader().loadAsync('/model.glb');
+      const gltf = await new GLTFLoader().loadAsync(`/private-model?token=${encodeURIComponent(modelToken)}`);
       scene.add(gltf.scene);
       const box = new THREE.Box3().setFromObject(gltf.scene);
       if (!box.isEmpty()) {

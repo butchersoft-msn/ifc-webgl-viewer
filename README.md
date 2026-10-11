@@ -5,7 +5,7 @@ Render private model geometry on the server and stream video to a browser with f
 ## Architecture
 
 - Express serves the client and same-origin WebSocket signaling on one HTTP port.
-- Puppeteer runs Chromium with Three.js **on the server only**. Private renderer URLs use an intercepted loopback origin. Puppeteer fulfills these virtual requests inside server Chromium; no HTTP endpoint actually serves the models.
+- Puppeteer runs Chromium with Three.js **on the server only**. Renderer modules use an intercepted loopback origin. GLB downloads use normal HTTP at `/private-model`, restricted to loopback peers and a random per-session renderer token that is revoked when the session ends. Model bytes never pass through the DevTools control channel.
 - `canvas.captureStream()` feeds the preferred WebRTC transport, with video encoding handled by Chromium. If WebRTC has not connected after **5 seconds**, video automatically falls back to the authenticated same-origin WebSocket: Chromium `MediaRecorder` encodes the server canvas as WebM, and the client's built-in `MediaSource` displays it in a video element.
 - Fallback requires browser support for `MediaSource` with `video/webm` VP8; it is not universal. Neither transport uses base64 JPEG. The client displays video and sends input; it does not receive geometry, IFC, GLB, or the Three.js scene.
 - Sessions are non-shareable, use an HttpOnly cookie, allow one WebSocket per session, and expire after one hour. Use separate browser profiles/private contexts for independent viewers, not tabs sharing a cookie.
@@ -33,7 +33,7 @@ $env:MODEL_PATH = "C:\private\model.glb"
 npm start
 ```
 
-`MODEL_PATH` must point to a self-contained `.glb` without external asset dependencies. There is no runtime model-download route. The converter exports geometry only: BIM metadata and complete material fidelity are not preserved. Huge models can exceed conversion/rendering memory limits.
+`MODEL_PATH` must point to a self-contained `.glb` without external asset dependencies. The server keeps only its private path and streams the file to server Chromium through the token-protected loopback endpoint; viewer clients receive neither the token nor geometry. The converter exports geometry only: BIM metadata and complete material fidelity are not preserved. Huge models can exceed conversion/rendering memory limits.
 
 The converter creates output GLB files exclusively and refuses to overwrite an existing file. Deliberately delete the old output before reconversion, or choose a new output path.
 

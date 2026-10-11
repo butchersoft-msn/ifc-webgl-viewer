@@ -63,7 +63,7 @@ npm run convert -- "/private/model.ifc" "/private/model.glb"
 MODEL_PATH="/private/model.glb" npm start
 ```
 
-Without `MODEL_PATH`, a demo scene is used. GLB files must not depend on external assets. Conversion is geometry-only, not complete BIM metadata/material preservation; huge models may exhaust memory. Private renderer URLs use an intercepted loopback origin: Puppeteer fulfills virtual requests only inside server Chromium, and no HTTP endpoint actually serves models. Viewers can capture visible pixels; this is not DRM.
+Without `MODEL_PATH`, a demo scene is used. GLB files must not depend on external assets. Conversion is geometry-only, not complete BIM metadata/material preservation; huge models may exhaust memory. Renderer modules use an intercepted loopback origin. GLB files are streamed over normal HTTP at `/private-model`, accessible only from loopback with a random per-session renderer token. Tokens are never sent to viewer clients and are revoked when sessions end; file paths remain private. Viewers can capture visible pixels; this is not DRM.
 
 ## Video transport
 
