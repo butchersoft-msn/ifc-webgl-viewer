@@ -89,6 +89,8 @@ npm start
 
 For external access, configure an HTTPS reverse proxy that forwards to the server and supports same-origin WebSocket upgrades. When `HOST` is not loopback, `APP_ORIGIN` is required and must match the public origin:
 
+A public/non-loopback `APP_ORIGIN` requires HTTPS and `VIEWER_PASSWORD`, even if backend `HOST` remains loopback. Set the shared password before starting with the external configuration below.
+
 ```powershell
 $env:HOST = "0.0.0.0"
 $env:APP_ORIGIN = "https://viewer.example.com"
@@ -97,6 +99,8 @@ npm start
 ```
 
 Replace example ICE endpoints/credentials with your STUN/TURN service. `ICE_SERVERS` is a JSON array of `RTCIceServer` objects. Allow WebRTC UDP connectivity or provide a reachable TURN relay: an HTTPS/WebSocket proxy does not relay WebRTC media. The automatic WebM fallback uses the proxied WebSocket on supported browsers. Keep passwords and TURN credentials out of source control.
+
+Express limits all HTTP requests to 120/minute/IP and `POST /session` to 10/minute/IP. Behind a reverse proxy, the default limiter uses the proxy IP, so all users share its quota. Do not change `trust proxy` blindly; review proxy trust and rate limiting before production deployment.
 
 ## Troubleshooting and Windows verification
 
@@ -107,6 +111,8 @@ Replace example ICE endpoints/credentials with your STUN/TURN service. `ICE_SERV
 - Slow rendering: reduce concurrent sessions/model size and inspect CPU, memory, GPU, and network use. Each session has rendering/encoding costs. GPU use is not guaranteed, SwiftShader is software, and Chromium encoding does not promise NVENC.
 
 Windows verification checklist (not a record of completed tests):
+
+Windows CI currently reports `action_required` awaiting maintainer approval. No Windows jobs have executed.
 
 - [ ] Confirm Node >=22.12 and successful `npm install` from the replacement package.
 - [ ] Start on `127.0.0.1:3000`; verify demo video, WASD/arrows, mouse look, and Escape.

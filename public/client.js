@@ -49,6 +49,7 @@ form.addEventListener('submit', async event => {
     let chain = Promise.resolve();
     let sourceBuffer;
     let mediaSource;
+    let fallback = false;
     const chunks = [];
     function appendChunk() {
       if (!sourceBuffer || sourceBuffer.updating || !chunks.length) return;
@@ -68,6 +69,7 @@ form.addEventListener('submit', async event => {
       if (event.candidate) send({ type: 'ice', candidate: event.candidate.toJSON() });
     };
     currentPeer.onconnectionstatechange = () => {
+      if (fallback) return;
       status.textContent = `Video: ${currentPeer.connectionState}`;
     };
     currentSocket.onmessage = event => {
@@ -80,6 +82,7 @@ form.addEventListener('submit', async event => {
           return;
         }
         const message = JSON.parse(event.data);
+        if (fallback && (message.type === 'offer' || message.type === 'ice')) return;
         if (message.type === 'offer') {
           await currentPeer.setRemoteDescription({ type: 'offer', sdp: message.sdp });
           for (const candidate of pendingIce.splice(0)) await currentPeer.addIceCandidate(candidate);
@@ -92,6 +95,8 @@ form.addEventListener('submit', async event => {
           if (!window.MediaSource || !MediaSource.isTypeSupported(message.mimeType)) {
             throw new Error('WebRTC unavailable; this browser cannot play the WebM fallback');
           }
+          fallback = true;
+          currentPeer.onicecandidate = null;
           currentPeer.close();
           video.srcObject = null;
           mediaSource = new MediaSource();

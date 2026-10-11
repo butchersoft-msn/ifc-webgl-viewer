@@ -5,6 +5,7 @@ const fs = require('node:fs/promises');
 const { randomBytes, timingSafeEqual } = require('node:crypto');
 const { WebSocketServer, WebSocket } = require('ws');
 const puppeteer = require('puppeteer');
+const { rateLimit } = require('express-rate-limit');
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
@@ -22,6 +23,10 @@ async function start(options = {}) {
   }
   if (configuredOrigin && new URL(configuredOrigin).origin !== configuredOrigin) {
     throw new Error('APP_ORIGIN must be an exact origin without a trailing slash');
+  }
+  if (configuredOrigin && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(configuredOrigin).hostname) &&
+      (!password || !configuredOrigin.startsWith('https://'))) {
+    throw new Error('Public APP_ORIGIN requires VIEWER_PASSWORD and HTTPS');
   }
   if (!['127.0.0.1', 'localhost', '::1'].includes(host) && !configuredOrigin.startsWith('https://')) {
     throw new Error('External APP_ORIGIN must use HTTPS');
@@ -73,13 +78,15 @@ async function start(options = {}) {
     return /(?:^|;\s*)viewer=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie || '')?.[1];
   }
   app.disable('x-powered-by');
+  app.use(rateLimit({ windowMs: 60000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }));
   app.use((req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Security-Policy', "default-src 'self'; connect-src 'self'; media-src 'self' blob:; frame-ancestors 'none'");
     next();
   });
-  app.post('/session', express.json({ limit: '1kb' }), async (req, res) => {
+  app.post('/session', rateLimit({ windowMs: 60000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false }),
+    express.json({ limit: '1kb' }), async (req, res) => {
     if (req.headers.origin !== origin) return res.sendStatus(403);
     if (password) {
       const supplied = Buffer.from(typeof req.body?.password === 'string' ? req.body.password : '');

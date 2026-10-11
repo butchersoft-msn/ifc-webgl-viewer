@@ -23,6 +23,7 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
   await assert.rejects(convert(fixture, modelPath), /EEXIST/);
   await assert.rejects(convert(fixture, path.join(__dirname, '../public/private.glb')), /outside public/);
   await assert.rejects(start({ host: '0.0.0.0', password: '', port: 0 }), /External hosting requires/);
+  await assert.rejects(start({ origin: 'https://viewer.example.com', password: '', port: 0 }), /requires VIEWER_PASSWORD/);
   await assert.rejects(start({ modelPath: path.join(__dirname, '../public/client.js'), port: 0 }), /outside public/);
 
   const viewer = await start({ port: 0, password: 'test-password', modelPath });
@@ -73,6 +74,10 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
   }
   assert.equal(viewer.sessions.size, 2);
   const sessions = [...viewer.sessions.values()];
+  // A delayed WebRTC candidate must not tear down an already-playing fallback.
+  sessions[0].ws.send(JSON.stringify({ type: 'ice', candidate: {
+    candidate: 'candidate:1 1 udp 1 127.0.0.1 12345 typ host', sdpMid: '0', sdpMLineIndex: 0,
+  } }));
   const positions = await Promise.all(sessions.map(session => session.page.evaluate(() => window.camera.position.toArray())));
   assert.deepEqual(positions[0], positions[1]);
   await clients[0].keyboard.down('ArrowUp');
@@ -86,4 +91,6 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
   await clients[0].close();
   await new Promise(resolve => setTimeout(resolve, 300));
   assert.equal(viewer.sessions.size, 1);
+  for (let i = 0; i < 7; i++) await sessionRequest('wrong');
+  assert.equal((await sessionRequest('wrong')).status, 429);
 });

@@ -18,6 +18,7 @@ try {
   let updated = 0;
   let lastTime = performance.now();
   let peer;
+  let fallback = false;
   const pendingIce = [];
   window.setInput = value => {
     input = value;
@@ -26,10 +27,12 @@ try {
     camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x - value.y * 0.002, -1.5, 1.5);
   };
   window.acceptAnswer = async sdp => {
+    if (fallback) return;
     await peer.setRemoteDescription({ type: 'answer', sdp });
     for (const candidate of pendingIce.splice(0)) await peer.addIceCandidate(candidate);
   };
   window.acceptIce = async candidate => {
+    if (fallback) return;
     if (peer.remoteDescription) await peer.addIceCandidate(candidate);
     else pendingIce.push(candidate);
   };
@@ -62,6 +65,9 @@ try {
     await window.sendSignal({ type: 'offer', sdp: peer.localDescription.sdp });
     setTimeout(() => {
       if (peer.connectionState === 'connected') return;
+      fallback = true;
+      peer.onicecandidate = null;
+      peer.close();
       const mimeType = 'video/webm;codecs=vp8';
       if (!MediaRecorder.isTypeSupported(mimeType)) {
         void window.sendSignal({ type: 'error', message: 'WebRTC failed and WebM fallback is unavailable' });

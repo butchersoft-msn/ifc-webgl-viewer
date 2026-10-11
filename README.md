@@ -55,6 +55,8 @@ Set environment variables before starting:
 
 For external access, use an HTTPS reverse proxy with WebSocket upgrade support and set `APP_ORIGIN` to its public HTTPS origin. Preferred WebRTC media needs UDP connectivity or appropriate TURN relay service; the proxy does not relay WebRTC media. Supported browsers can instead use the automatic WebM fallback over that WebSocket.
 
+A public/non-loopback `APP_ORIGIN` requires HTTPS and `VIEWER_PASSWORD`, even when backend `HOST` is loopback. Express rate limits all HTTP requests to 120/minute/IP and `POST /session` to 10/minute/IP. Behind a reverse proxy, the default limiter sees the proxy IP, so users share its quota. Do not blindly change `trust proxy`; proxy trust and rate limiting need production review.
+
 ## Limits and verification
 
 Each viewer incurs server rendering, encoding, memory, and bandwidth costs. GPU acceleration is environment-dependent; no NVIDIA/NVENC encoding, hardware capacity, latency, or frame-rate guarantee is made. SwiftShader is a software fallback, not GPU acceleration. Keep Chromium's sandbox enabled.
@@ -62,3 +64,5 @@ Each viewer incurs server rendering, encoding, memory, and bandwidth costs. GPU 
 Private model files are not delivered to clients, but visible pixels can be captured: this is **not DRM**. A shared password is not per-user account management.
 
 Linux Node 22 integration passed with sandbox-enabled software rendering, IFC conversion, decoded fallback video, navigation, session isolation, and private-route checks. `npm audit` reported zero vulnerabilities. The direct WebRTC path could not be validated because the runner returned no usable ICE candidates. Hardware GPU and Windows execution remain pending; follow the Windows checklist in [SETUP.md](SETUP.md).
+
+Windows CI is `action_required`, awaiting maintainer approval; no Windows jobs have executed.
