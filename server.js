@@ -57,6 +57,8 @@ async function start(options = {}) {
   });
   const app = express();
   const server = http.createServer(app);
+  const needsLoopbackServer = !['127.0.0.1', 'localhost', '::', '::1', '0.0.0.0'].includes(host);
+  const modelServer = needsLoopbackServer ? http.createServer(app) : server;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16384 });
   const sessions = new Map();
   const modelTokens = new Set();
@@ -113,7 +115,7 @@ async function start(options = {}) {
     const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
     const token = typeof req.query.token === 'string' ? req.query.token : '';
     if (!model || !loopback || !modelTokens.has(token)) return res.sendStatus(404);
-    res.sendFile(model, { headers: { 'Content-Type': 'model/gltf-binary' } });
+    res.sendFile(model, { dotfiles: 'allow', headers: { 'Content-Type': 'model/gltf-binary' } });
   });
   // Only these three client assets are public, even if a model is misplaced.
   for (const file of ['index.html', 'client.js', 'styles.css']) {
@@ -207,15 +209,22 @@ async function start(options = {}) {
       server.once('error', reject);
       server.listen(port, host, resolve);
     });
-  } catch (error) { await browser.close(); throw error; }
+    if (needsLoopbackServer) {
+      await new Promise((resolve, reject) => {
+        modelServer.once('error', reject);
+        modelServer.listen(0, '127.0.0.1', resolve);
+      });
+    }
+  } catch (error) { server.close(); await browser.close(); throw error; }
   origin = configuredOrigin || `http://${host === '::1' ? '[::1]' : host}:${server.address().port}`;
   const rendererHost = ['::', '::1'].includes(host) ? '[::1]' : host === 'localhost' ? 'localhost' : '127.0.0.1';
-  const rendererOrigin = `http://${rendererHost}:${server.address().port}`;
+  const rendererOrigin = `http://${rendererHost}:${modelServer.address().port}`;
   console.log(`Remote viewer: ${origin} (${model ? 'private GLB' : 'demo scene'})`);
   async function close() {
     await Promise.all([...sessions.keys()].map(remove));
     wss.close();
     await new Promise(resolve => server.close(resolve));
+    if (needsLoopbackServer) await new Promise(resolve => modelServer.close(resolve));
     await browser.close();
   }
   return { server, browser, sessions, origin, close };

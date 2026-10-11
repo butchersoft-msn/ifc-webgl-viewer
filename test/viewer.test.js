@@ -10,7 +10,9 @@ const { convert } = require('../convert');
 test('private IFC conversion and independent video-only sessions', { timeout: 120000 }, async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'private-viewer-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const modelPath = path.join(directory, 'wall.glb');
+  const privateDirectory = path.join(directory, '.private');
+  await fs.mkdir(privateDirectory);
+  const modelPath = path.join(privateDirectory, 'wall.glb');
   const fixture = path.join(__dirname, 'fixtures/wall.ifc.txt');
   assert.ok(await convert(fixture, modelPath) > 0);
   const glb = await fs.readFile(modelPath);
@@ -153,4 +155,41 @@ test('private model rejects remote peers and revokes replaced session tokens', {
   }
   assert.equal((await create(first.headers.get('set-cookie').split(';')[0])).status, 200);
   assert.equal((await fetch(localOrigin + route)).status, 404);
+});
+
+test('specific network binding still gives the renderer loopback model access', { timeout: 120000 }, async t => {
+  const remote = Object.values(os.networkInterfaces()).flat()
+    .find(address => address.family === 'IPv4' && !address.internal);
+  if (!remote) return t.skip('No non-loopback IPv4 interface available');
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'private-binding-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const modelPath = path.join(directory, 'model.glb');
+  await convert(path.join(__dirname, 'fixtures/wall.ifc.txt'), modelPath);
+  const viewer = await start({ host: remote.address, port: 0, origin: 'https://viewer.example.com',
+    password: 'test-password', modelPath });
+  t.after(() => viewer.close());
+  const origin = `http://${remote.address}:${viewer.server.address().port}`;
+  const response = await fetch(`${origin}/session`, {
+    method: 'POST', headers: { Origin: viewer.origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: 'test-password' }),
+  });
+  assert.equal(response.status, 200);
+  const session = [...viewer.sessions.values()][0];
+  const socket = new WebSocket(origin.replace('http:', 'ws:') + '/signal', {
+    origin: viewer.origin, headers: { Cookie: response.headers.get('set-cookie').split(';')[0] },
+  });
+  t.after(() => socket.close());
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Model load timed out')), 30000);
+    t.after(() => clearTimeout(timer));
+    socket.on('error', reject);
+    socket.on('message', data => {
+      const message = JSON.parse(data.toString());
+      if (message.type === 'error') reject(new Error(message.message));
+      if (message.type === 'offer') { clearTimeout(timer); resolve(); }
+    });
+  });
+  assert.equal(new URL(session.page.url()).hostname, '127.0.0.1');
+  assert.notDeepEqual(await session.page.evaluate(() => window.camera.position.toArray()), [0, 2, 12]);
+  assert.equal((await fetch(`${origin}/private-model?token=${session.modelToken}`)).status, 404);
 });
