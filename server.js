@@ -10,6 +10,64 @@ const { rateLimit } = require('express-rate-limit');
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const SESSION_MS = 60 * 60 * 1000;
+const MAX_MODEL_JSON_BYTES = 16 * 1024 * 1024;
+
+async function validateGlb(handle, size) {
+  async function read(length, position) {
+    const bytes = Buffer.alloc(length);
+    const result = await handle.read(bytes, 0, length, position);
+    if (result.bytesRead !== length) throw new Error('Invalid private model');
+    return bytes;
+  }
+  if (size < 20) throw new Error('Invalid private model');
+  const header = await read(12, 0);
+  if (header.toString('ascii', 0, 4) !== 'glTF' || header.readUInt32LE(4) !== 2 ||
+      header.readUInt32LE(8) !== size) throw new Error('Invalid private model');
+  let offset = 12;
+  let first = true;
+  let binaryLength = 0;
+  let hasBinary = false;
+  let headerJsonLength = 0;
+  let document;
+  while (offset < size) {
+    if (size - offset < 8) throw new Error('Invalid private model');
+    const chunk = await read(8, offset);
+    const length = chunk.readUInt32LE(0);
+    const type = chunk.readUInt32LE(4);
+    offset += 8;
+    if (length % 4 !== 0 || length > size - offset) throw new Error('Invalid private model');
+    if (first) {
+      if (type !== 0x4e4f534a || !length || length > MAX_MODEL_JSON_BYTES) throw new Error('Invalid private model');
+      document = JSON.parse((await read(length, offset)).toString('utf8'));
+      if (!document || typeof document !== 'object' || Array.isArray(document) ||
+          document.asset?.version !== '2.0') throw new Error('Invalid private model');
+    } else if (type === 0x4e4f534a) {
+      throw new Error('Invalid private model');
+    } else if (type === 0x004e4942) {
+      if (hasBinary || offset !== 28 + headerJsonLength) throw new Error('Invalid private model');
+      hasBinary = true;
+      binaryLength = length;
+    }
+    if (first) headerJsonLength = length;
+    first = false;
+    offset += length;
+  }
+  for (const key of ['buffers', 'images']) {
+    if (document[key] !== undefined && !Array.isArray(document[key])) throw new Error('Invalid private model');
+    for (const entry of document[key] || []) {
+      if (!entry || typeof entry !== 'object' ||
+          (entry.uri !== undefined && (typeof entry.uri !== 'string' || !entry.uri.startsWith('data:')))) {
+        throw new Error('Invalid private model');
+      }
+    }
+  }
+  for (const [index, buffer] of (document.buffers || []).entries()) {
+    if (!Number.isSafeInteger(buffer.byteLength) || buffer.byteLength < 0 ||
+        (buffer.uri === undefined && (index !== 0 || !hasBinary || buffer.byteLength > binaryLength))) {
+      throw new Error('Invalid private model');
+    }
+  }
+}
 
 async function start(options = {}) {
   const host = options.host ?? process.env.HOST ?? '127.0.0.1';
@@ -74,13 +132,13 @@ async function start(options = {}) {
     const handle = await fs.open(resolved, 'r');
     try {
       const stat = await handle.stat();
-      const magic = Buffer.alloc(4);
       if (!stat.isFile()) throw new Error('Invalid private model');
-      await handle.read(magic, 0, 4, 0);
+      await validateGlb(handle, stat.size);
       const current = await fs.stat(resolved);
-      if (magic.toString('ascii') !== 'glTF' || await fs.realpath(source) !== resolved ||
+      if (await fs.realpath(source) !== resolved ||
           await fs.realpath(resolved) !== resolved ||
-          current.dev !== stat.dev || current.ino !== stat.ino) throw new Error('Invalid private model');
+          current.dev !== stat.dev || current.ino !== stat.ino || current.size !== stat.size ||
+          current.mtimeMs !== stat.mtimeMs || current.ctimeMs !== stat.ctimeMs) throw new Error('Invalid private model');
       return { handle, resolved, stat };
     } catch (error) { await handle.close(); throw error; }
   }

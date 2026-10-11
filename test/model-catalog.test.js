@@ -49,7 +49,28 @@ async function fixture(t, options = {}) {
   });
   return { directory, modelDirectory, viewer, post };
 }
-async function glb(file, suffix = '') { await fs.writeFile(file, `glTF${suffix}`); }
+function modelBytes(suffix = '', document = { asset: { version: '2.0' } }) {
+  const json = Buffer.from(JSON.stringify(document));
+  const padded = Buffer.concat([json, Buffer.alloc((4 - json.length % 4) % 4, 0x20)]);
+  const binary = Buffer.from(suffix);
+  const paddedBinary = Buffer.concat([binary, Buffer.alloc((4 - binary.length % 4) % 4)]);
+  const result = Buffer.alloc(28 + padded.length + paddedBinary.length);
+  result.write('glTF');
+  result.writeUInt32LE(2, 4);
+  result.writeUInt32LE(result.length, 8);
+  result.writeUInt32LE(padded.length, 12);
+  result.writeUInt32LE(0x4e4f534a, 16);
+  padded.copy(result, 20);
+  result.writeUInt32LE(paddedBinary.length, 20 + padded.length);
+  result.writeUInt32LE(0x004e4942, 24 + padded.length);
+  paddedBinary.copy(result, 28 + padded.length);
+  return result;
+}
+async function glb(file, suffix = '') { await fs.writeFile(file, modelBytes(suffix)); }
+async function assertModel(response, suffix) {
+  assert.equal(response.status, 200);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), modelBytes(suffix));
+}
 function cookie(response) { return response.headers.get('set-cookie').split(';')[0]; }
 async function connect(t, viewer, response) {
   const socket = new WebSocket(viewer.origin.replace('http:', 'ws:') + '/signal', {
@@ -124,8 +145,8 @@ test('selection isolates token-bound models and enforces exact renderer requests
   await connect(t, viewer, second);
   const [one, two] = [...viewer.sessions.values()];
   const route = token => `${viewer.origin}/private-model?token=${token}`;
-  assert.equal(await (await fetch(route(one.modelToken))).text(), 'glTFone');
-  assert.equal(await (await fetch(route(two.modelToken))).text(), 'glTFtwo');
+  await assertModel(await fetch(route(one.modelToken)), 'one');
+  await assertModel(await fetch(route(two.modelToken)), 'two');
   assert.notEqual(one.modelToken, two.modelToken);
   for (const session of [one, two]) {
     assert.equal(session.page.config.hasModel, true);
@@ -254,12 +275,12 @@ test('MODEL_PATH remains default outside catalog and is revalidated, and MODEL_D
     const response = await post('/session', body);
     assert.equal(response.status, 200);
     const session = [...viewer.sessions.values()].at(-1);
-    assert.equal(await (await fetch(`${viewer.origin}/private-model?token=${session.modelToken}`)).text(), 'glTFlegacy');
+    await assertModel(await fetch(`${viewer.origin}/private-model?token=${session.modelToken}`), 'legacy');
   }
   const response = await post('/session', { modelId: list.models[1].id });
   const session = [...viewer.sessions.values()].at(-1);
   assert.equal(response.status, 200);
-  assert.equal(await (await fetch(`${viewer.origin}/private-model?token=${session.modelToken}`)).text(), 'glTFchoice');
+  await assertModel(await fetch(`${viewer.origin}/private-model?token=${session.modelToken}`), 'choice');
   await fs.writeFile(defaultPath, 'bad!');
   assert.equal((await post('/session')).status, 400);
 });
@@ -326,4 +347,51 @@ test('discovery I/O failures are sanitized and a symlink swap during validation 
   } finally { fs.open = open; }
   assert.equal(viewer.sessions.size, 1);
   assert.equal([...viewer.sessions.values()][0], original);
+});
+
+test('GLB validation skips malformed and external assets and rejects changed files before session replacement', async t => {
+  const { modelDirectory, viewer, post } = await fixture(t);
+  const valid = modelBytes();
+  const badLength = Buffer.from(valid);
+  badLength.writeUInt32LE(valid.length + 4, 8);
+  const badVersion = Buffer.from(valid);
+  badVersion.writeUInt32LE(1, 4);
+  const badJson = Buffer.from(valid);
+  badJson[20] = 0x21;
+  const badChunk = Buffer.from(valid);
+  badChunk.writeUInt32LE(valid.length, 12);
+  const wrongFirst = Buffer.from(valid);
+  wrongFirst.writeUInt32LE(0x004e4942, 16);
+  const overCap = Buffer.alloc(20 + 16 * 1024 * 1024 + 4);
+  overCap.write('glTF');
+  overCap.writeUInt32LE(2, 4);
+  overCap.writeUInt32LE(overCap.length, 8);
+  overCap.writeUInt32LE(overCap.length - 20, 12);
+  overCap.writeUInt32LE(0x4e4f534a, 16);
+  const invalid = [
+    Buffer.from('glTF'), valid.subarray(0, 19), badLength, badVersion, badJson, badChunk, wrongFirst, overCap,
+    modelBytes('', {}), modelBytes('', { asset: { version: '1.0' } }),
+    modelBytes('', { asset: { version: '2.0' }, buffers: [{ byteLength: 4, uri: 'https://private.invalid/model.bin' }] }),
+    modelBytes('', { asset: { version: '2.0' }, images: [{ uri: '../image.png' }] }),
+    modelBytes('', { asset: { version: '2.0' }, buffers: [{ byteLength: 4 }] }),
+  ];
+  for (const [index, bytes] of invalid.entries()) await fs.writeFile(path.join(modelDirectory, `bad-${index}.glb`), bytes);
+  await fs.writeFile(path.join(modelDirectory, 'embedded.glb'), modelBytes('', {
+    asset: { version: '2.0' }, buffers: [{ byteLength: 4, uri: 'data:application/octet-stream;base64,AAAAAA==' }],
+    images: [{ uri: 'data:image/png;base64,AAAA' }],
+  }));
+  const selected = path.join(modelDirectory, 'valid.glb');
+  await fs.writeFile(selected, valid);
+  const list = await (await post('/models')).json();
+  assert.deepEqual(list.models.map(item => item.name), ['Demo scene', 'embedded.glb', 'valid.glb']);
+  const modelId = list.models.find(item => item.name === 'valid.glb').id;
+  const active = await post('/session', { modelId });
+  const original = [...viewer.sessions.values()][0];
+  for (const bytes of [invalid[0], badLength, badJson, invalid[10], invalid[11], overCap, badChunk, invalid[12]]) {
+    await fs.writeFile(selected, bytes);
+    const failed = await post('/session', { modelId }, { Cookie: cookie(active) });
+    assert.equal(failed.status, 400);
+    assert.equal([...viewer.sessions.values()][0], original);
+    assert.equal((await fetch(`${viewer.origin}/private-model?token=${original.modelToken}`)).status, 404);
+  }
 });

@@ -293,7 +293,7 @@ test('private model rejects remote peers and revokes replaced session tokens', {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'private-endpoint-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const modelPath = path.join(directory, 'model.glb');
-  await fs.writeFile(modelPath, 'glTF');
+  await convert(path.join(__dirname, 'fixtures/wall.ifc.txt'), modelPath);
   const viewer = await start({ host: '0.0.0.0', port: 0, origin: 'https://viewer.example.com',
     password: 'test-password', modelPath });
   t.after(() => viewer.close());
@@ -307,7 +307,7 @@ test('private model rejects remote peers and revokes replaced session tokens', {
   assert.deepEqual(await first.json(), { iceServers: [] });
   const token = [...viewer.sessions.values()][0].modelToken;
   const route = `/private-model?token=${token}`;
-  assert.equal(await (await fetch(localOrigin + route)).text(), 'glTF');
+  assert.equal(await (await fetch(localOrigin + route, { headers: { Range: 'bytes=0-3' } })).text(), 'glTF');
   const remote = Object.values(os.networkInterfaces()).flat()
     .find(address => address.family === 'IPv4' && !address.internal);
   if (remote) {

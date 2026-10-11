@@ -51,6 +51,8 @@ npm start
 
 For multiple selectable models, create a private `model/` folder at the repository root and populate it with offline-converted, self-contained `.glb` files. Set `MODEL_DIRECTORY` to use a different private folder. Only supported GLBs directly in that folder are listed; raw IFC is not loaded or automatically converted. **Load available models** uses the same origin/password checks as session creation and returns only names and opaque selection IDs. Each session renders its selected file independently. Missing/empty folders retain the default/demo option; invalid files are excluded and discovery/access errors appear in setup. Both the folder and resolved files must stay outside `public/`; symlinks escaping the folder are rejected.
 
+GLBs must have a valid version-2 header, consistent chunk lengths, and glTF JSON metadata no larger than 16 MiB. External buffer/image URLs are rejected; embedded data URIs are allowed. Validation happens again before session creation and private serving. It is not a complete glTF semantic validator: unsupported renderer features can still fail during loading, which restores setup.
+
 The converter creates output GLB files exclusively and refuses to overwrite an existing file. Deliberately delete the old output before reconversion, or choose a new output path.
 
 ## Configuration
@@ -64,7 +66,7 @@ Set environment variables before starting:
 | `MAX_SESSIONS` | Concurrent session limit; default `4`, not a performance guarantee. |
 | `MODEL_PATH` | Private self-contained GLB path; unset selects the demo. |
 | `MODEL_DIRECTORY` | Private catalog folder; defaults to repository `model/`. Only self-contained GLBs are supported. |
-| `VIEWER_PASSWORD` | Optional shared login password, submitted as `password` to `POST /session`. |
+| `VIEWER_PASSWORD` | Optional shared login password, submitted as `password` to `POST /models` and `POST /session`. |
 | `APP_ORIGIN` | Externally visible origin; required when `HOST` is not loopback. |
 | `ICE_SERVERS` | JSON array of `RTCIceServer` objects for STUN/TURN. |
 | `CHROME_EXECUTABLE_PATH` | Optional Chromium executable override. |
@@ -72,7 +74,7 @@ Set environment variables before starting:
 
 For external access, use an HTTPS reverse proxy with WebSocket upgrade support and set `APP_ORIGIN` to its public HTTPS origin. Preferred WebRTC media needs UDP connectivity or appropriate TURN relay service; the proxy does not relay WebRTC media. Supported browsers can instead use the automatic WebM fallback over that WebSocket.
 
-A public/non-loopback `APP_ORIGIN` requires HTTPS and `VIEWER_PASSWORD`, even when backend `HOST` is loopback. Express rate limits all HTTP requests to 120/minute/IP and `POST /session` to 10/minute/IP. Behind a reverse proxy, the default limiter sees the proxy IP, so users share its quota. Do not blindly change `trust proxy`; proxy trust and rate limiting need production review.
+A public/non-loopback `APP_ORIGIN` requires HTTPS and `VIEWER_PASSWORD`, even when backend `HOST` is loopback. Express rate limits all HTTP requests to 120/minute/IP and each of `POST /models` and `POST /session` to 10/minute/IP. Behind a reverse proxy, the default limiter sees the proxy IP, so users share its quota. Do not blindly change `trust proxy`; proxy trust and rate limiting need production review.
 
 ## Limits and verification
 
@@ -87,5 +89,7 @@ Linux Node 22 integration passed with sandbox-enabled software rendering, IFC co
 For the navigation update, `node --test test/navigation.test.js` passed all four deterministic tests (bounds fitting, acceleration/reset, facing-direction dolly, and client controls/wheel normalization). `CHROME_EXECUTABLE_PATH=/usr/bin/chromium CHROME_SOFTWARE_RENDERING=1 npm test` ran on Node 22: four passed and all four browser integration tests failed at Chromium launch with “No usable sandbox”, before streaming/session checks could execute. The sandbox was not disabled. JavaScript syntax and `git diff --check` passed; the locked dependency install reported zero audit vulnerabilities.
 
 For the paused-viewer update, deterministic client/navigation, authenticated command handling (with a renderer test double), and private Three.js tool tests passed. Browser integration was attempted with sandbox-enabled Chromium but failed at launch with “No usable sandbox”, before streamed checks could run. WebRTC/fallback visual checks remain pending in a sandbox-capable environment; the full browser suite was not rerun after that launch failure. CodeQL reported zero alerts. Automated review was unavailable due to its configured model; a separate read-only review checked the changes.
+
+For the model-dropdown/toolbar update, the full suite with system Chromium and software rendering passed 33 of 37 tests. All four browser integration tests failed at launch with “No usable sandbox”; sandbox protection was not disabled. Deterministic readiness/fallback/stale-attempt, toolbar, catalog validation, and session isolation tests passed. Decoded streaming, visual model selection, and hardware GPU checks remain pending in a sandbox-capable environment.
 
 The current PR's Windows CI is `action_required`, awaiting maintainer approval.

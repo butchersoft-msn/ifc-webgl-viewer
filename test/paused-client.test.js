@@ -294,3 +294,13 @@ test('request timeout and stale session responses leave setup usable', async () 
   assert.equal(c.run('sessionState'), 'setup');
   assert.equal(c.element('toolbar').hidden, true);
 });
+
+test('invalid selected model rejection preserves setup and offers catalog refresh', async () => {
+  const c = await connectingClient();
+  c.run('disconnect()');
+  c.context.fetch = async () => ({ ok: false, status: 400 });
+  await c.fire('login', 'submit', { preventDefault() {} });
+  assert.equal(c.element('login').hidden, false);
+  assert.equal(c.element('startViewing').disabled, false);
+  assert.match(c.element('connectionStatus').textContent, /Load available models again/);
+});
