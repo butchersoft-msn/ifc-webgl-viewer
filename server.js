@@ -77,6 +77,8 @@ async function start(options = {}) {
     if (!session) return;
     sessions.delete(id);
     clearTimeout(session.timer);
+    clearInterval(session.syncInterval);
+    clearInterval(session.rateTimer);
     modelTokens.delete(session.modelToken);
     session.ws?.close(1000, 'Session ended');
     await session.page?.close().catch(() => {});
@@ -139,29 +141,41 @@ async function start(options = {}) {
     let ready = false;
     let chain = Promise.resolve();
     let count = 0;
-    const rateTimer = setInterval(() => { count = 0; }, 1000);
+    let pendingInput = null;
+    let inputSyncing = false;
+    session.rateTimer = setInterval(() => { count = 0; }, 1000);
     const send = message => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
     };
-    ws.on('close', () => { clearInterval(rateTimer); void remove(id); });
+    ws.on('close', () => { ready = false; void remove(id); });
     ws.on('error', () => void remove(id));
     ws.on('message', data => {
       if (++count > 100) return ws.close(1008, 'Input rate exceeded');
+      if (!ready) return;
+      let message;
+      try {
+        message = JSON.parse(data.toString());
+        if (message.type === 'input') {
+          const delta = value => Number.isFinite(value) ? Math.max(-500, Math.min(500, value)) : 0;
+          pendingInput = {
+            forward: message.forward === true, backward: message.backward === true,
+            left: message.left === true, right: message.right === true,
+            up: message.up === true, down: message.down === true,
+            x: delta((pendingInput?.x || 0) + delta(message.x)),
+            y: delta((pendingInput?.y || 0) + delta(message.y)),
+          };
+          return;
+        }
+      } catch {
+        ws.close(1008, 'Invalid signaling message');
+        return;
+      }
       chain = chain.then(async () => {
         if (!ready) return;
-        const message = JSON.parse(data.toString());
         if (message.type === 'answer' && typeof message.sdp === 'string' && message.sdp.length < 12000) {
           await session.page.evaluate(sdp => window.acceptAnswer(sdp), message.sdp);
         } else if (message.type === 'ice' && message.candidate && typeof message.candidate.candidate === 'string') {
           await session.page.evaluate(candidate => window.acceptIce(candidate), message.candidate);
-        } else if (message.type === 'input') {
-          const input = {
-            forward: message.forward === true, backward: message.backward === true,
-            left: message.left === true, right: message.right === true,
-            x: Number.isFinite(message.x) ? Math.max(-500, Math.min(500, message.x)) : 0,
-            y: Number.isFinite(message.y) ? Math.max(-500, Math.min(500, message.y)) : 0,
-          };
-          await session.page.evaluate(input => window.setInput(input), input);
         }
       }).catch(() => ws.close(1008, 'Invalid signaling message'));
     });
@@ -194,9 +208,25 @@ async function start(options = {}) {
       await page.waitForFunction(() => window.rendererReady || window.rendererError, { timeout: 60000, polling: 100 });
       const error = await page.evaluate(() => window.rendererError);
       if (error) throw new Error(error);
+      const gpu = await page.evaluate(() => window.getGPUInfo());
+      if (!sessions.has(id)) return;
       ready = true;
+      session.syncInterval = setInterval(async () => {
+        if (!ready || inputSyncing || !pendingInput) return;
+        const input = pendingInput;
+        pendingInput = null;
+        inputSyncing = true;
+        try {
+          await page.evaluate(input => window.setInput(input), input);
+        } catch {
+          ws.close(1011, 'Input sync failed');
+          await remove(id);
+        } finally {
+          inputSyncing = false;
+        }
+      }, 33);
       await page.evaluate(config => window.startStream(config),
-        { iceServers, hasModel: !!model, modelToken: session.modelToken });
+        { iceServers, hasModel: !!model, modelToken: session.modelToken, gpu });
     } catch (error) {
       console.error('Renderer session failed:', error.message);
       send({ type: 'error', message: 'Renderer failed. Check the server log.' });

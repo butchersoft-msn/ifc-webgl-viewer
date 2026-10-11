@@ -109,6 +109,35 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
   const moved = await Promise.all(sessions.map(session => session.page.evaluate(() => window.camera.position.toArray())));
   assert.notDeepEqual(moved[0], positions[0]);
   assert.deepEqual(moved[1], positions[1]);
+  await clients[0].waitForFunction(() => !document.getElementById('diagnostics').hidden);
+  const gpu = await sessions[0].page.evaluate(() => window.getGPUInfo());
+  assert.equal(await clients[0].$eval('#gpuRenderer', element => element.textContent), gpu.renderer);
+  assert.equal(await clients[0].$eval('#gpuVendor', element => element.textContent), gpu.vendor);
+  assert.ok(Number(await clients[0].$eval('#fps', element => element.textContent)) > 0);
+  await clients[0].evaluate(gpu => {
+    socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({
+      type: 'stats', fps: 10, renderTime: 45, inputLatency: 12, gpu,
+    }) }));
+  }, gpu);
+  await clients[0].waitForFunction(() => {
+    const warning = document.getElementById('performanceWarning').textContent;
+    return warning.includes('Low FPS') && warning.includes('Slow render');
+  });
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const beforeVertical = await sessions[0].page.evaluate(() => window.camera.position.toArray());
+  await clients[0].keyboard.down('Shift');
+  await clients[0].keyboard.down('ArrowUp');
+  await new Promise(resolve => setTimeout(resolve, 600));
+  await clients[0].keyboard.up('ArrowUp');
+  const above = await sessions[0].page.evaluate(() => window.camera.position.toArray());
+  assert.ok(above[1] > beforeVertical[1]);
+  assert.equal(above[0], beforeVertical[0]);
+  assert.equal(above[2], beforeVertical[2]);
+  await clients[0].keyboard.down('ArrowDown');
+  await new Promise(resolve => setTimeout(resolve, 600));
+  await clients[0].keyboard.up('ArrowDown');
+  await clients[0].keyboard.up('Shift');
+  assert.ok((await sessions[0].page.evaluate(() => window.camera.position.y)) < above[1]);
   await sessions[0].page.evaluate(() => window.setInput({ x: 80, y: 30 }));
   assert.notEqual(await sessions[0].page.evaluate(() => window.camera.rotation.y), await sessions[1].page.evaluate(() => window.camera.rotation.y));
   await clients[0].close();
@@ -123,6 +152,77 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
   assert.equal(await activeModel.text(), 'glTF');
   for (let i = 0; i < 7; i++) await sessionRequest('wrong');
   assert.equal((await sessionRequest('wrong')).status, 429);
+});
+
+test('input batching stays bounded during a stalled RPC and cleans up on close', { timeout: 30000 }, async t => {
+  const viewer = await start({ port: 0 });
+  t.after(() => viewer.close());
+  const response = await fetch(`${viewer.origin}/session`, {
+    method: 'POST', headers: { Origin: viewer.origin, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  const session = [...viewer.sessions.values()][0];
+  const socket = new WebSocket(viewer.origin.replace('http:', 'ws:') + '/signal', {
+    origin: viewer.origin, headers: { Cookie: response.headers.get('set-cookie').split(';')[0] },
+  });
+  t.after(() => socket.terminate());
+  const messages = [];
+  let firstStats;
+  const diagnosticsReady = new Promise(resolve => { firstStats = resolve; });
+  await new Promise((resolve, reject) => {
+    socket.on('error', reject);
+    socket.on('message', data => {
+      if (typeof data !== 'object' || data[0] !== 123) return;
+      const message = JSON.parse(data.toString());
+      messages.push(message);
+      if (message.type === 'stats') firstStats();
+      if (message.type === 'error') reject(new Error(message.message));
+      if (message.type === 'offer') resolve();
+    });
+  });
+  await diagnosticsReady;
+  const evaluate = session.page.evaluate.bind(session.page);
+  const calls = [];
+  let release;
+  const stalled = new Promise(resolve => { release = resolve; });
+  let firstCall;
+  const started = new Promise(resolve => { firstCall = resolve; });
+  session.page.evaluate = async (fn, ...args) => {
+    if (fn.toString().includes('window.setInput')) {
+      calls.push(args[0]);
+      if (calls.length === 1) { firstCall(); await stalled; }
+    }
+    return evaluate(fn, ...args);
+  };
+  t.after(release);
+  socket.send(JSON.stringify({ type: 'input', forward: true, x: 2, y: 3 }));
+  await started;
+  for (let i = 0; i < 10; i++) {
+    socket.send(JSON.stringify({ type: 'input', up: true, x: 1, y: -1 }));
+  }
+  socket.send(JSON.stringify({ type: 'input', down: true, x: 4, y: 2 }));
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.equal(calls.length, 1, 'No concurrent input RPCs while renderer is stalled');
+  release();
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.equal(calls.length, 2, 'Only the latest pending state is sent');
+  assert.deepEqual(calls[1], {
+    forward: false, backward: false, left: false, right: false, up: false, down: true, x: 14, y: -8,
+  });
+  await new Promise(resolve => setTimeout(resolve, 600));
+  assert.equal(calls.length, 2, 'Mouse deltas are not replayed without fresh input');
+  const stats = messages.find(message => message.type === 'stats' && message.inputLatency !== null);
+  assert.ok(stats);
+  assert.ok(Number.isFinite(stats.fps) && stats.fps > 0);
+  assert.ok(Number.isFinite(stats.renderTime) && stats.renderTime >= 0);
+  assert.ok(Number.isFinite(stats.inputLatency) && stats.inputLatency >= 0);
+  assert.deepEqual(stats.gpu, await evaluate(() => window.getGPUInfo()));
+  assert.ok(messages.some(message => message.type === 'stats' && message.inputLatency === null));
+  socket.close();
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.equal(viewer.sessions.size, 0);
+  assert.ok(session.syncInterval._destroyed);
+  assert.ok(session.rateTimer._destroyed);
 });
 
 test('private model rejects remote peers and revokes replaced session tokens', { timeout: 120000 }, async t => {

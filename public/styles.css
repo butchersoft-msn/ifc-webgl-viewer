@@ -49,6 +49,11 @@ input, button { display: block; margin-top: 8px; padding: 6px; }
 
 .stats div {
   line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+#performanceWarning {
+  color: #ffcc00;
 }
 
 .controls {
