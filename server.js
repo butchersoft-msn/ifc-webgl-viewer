@@ -66,6 +66,7 @@ async function start(options = {}) {
   const assets = new Map([
     ['/index.html', [path.join(ROOT, 'renderer/index.html'), 'text/html']],
     ['/renderer.js', [path.join(ROOT, 'renderer/renderer.js'), 'text/javascript']],
+    ['/navigation.mjs', [path.join(ROOT, 'renderer/navigation.mjs'), 'text/javascript']],
     ['/three.js', [path.join(ROOT, 'node_modules/three/build/three.module.js'), 'text/javascript']],
     ['/three.core.js', [path.join(ROOT, 'node_modules/three/build/three.core.js'), 'text/javascript']],
     ['/GLTFLoader.js', [path.join(ROOT, 'node_modules/three/examples/jsm/loaders/GLTFLoader.js'), 'text/javascript']],
@@ -157,12 +158,15 @@ async function start(options = {}) {
         message = JSON.parse(data.toString());
         if (message.type === 'input') {
           const delta = value => Number.isFinite(value) ? Math.max(-500, Math.min(500, value)) : 0;
+          if (message.reset === true) pendingInput = null;
           pendingInput = {
             forward: message.forward === true, backward: message.backward === true,
             left: message.left === true, right: message.right === true,
             up: message.up === true, down: message.down === true,
+            boost: message.boost === true, reset: message.reset === true || pendingInput?.reset === true,
             x: delta((pendingInput?.x || 0) + delta(message.x)),
             y: delta((pendingInput?.y || 0) + delta(message.y)),
+            wheel: delta((pendingInput?.wheel || 0) + delta(message.wheel)),
           };
           return;
         }

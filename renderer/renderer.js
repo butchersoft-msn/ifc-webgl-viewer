@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from './GLTFLoader.js';
+import { frameBounds, createNavigation } from './navigation.mjs';
 
 try {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -14,7 +15,7 @@ try {
   const camera = new THREE.PerspectiveCamera(70, 1280 / 720, 0.05, 10000);
   camera.rotation.order = 'YXZ';
   camera.position.set(0, 2, 12);
-  let input = {};
+  const navigation = createNavigation(camera);
   let updated = null;
   let lastTime = performance.now();
   let statsTime = lastTime;
@@ -26,10 +27,8 @@ try {
   let fallback = false;
   const pendingIce = [];
   window.setInput = value => {
-    input = value;
     updated = performance.now();
-    camera.rotation.y -= value.x * 0.002;
-    camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x - value.y * 0.002, -1.5, 1.5);
+    navigation.setInput(value, updated);
   };
   window.acceptAnswer = async sdp => {
     if (fallback) return;
@@ -55,18 +54,12 @@ try {
       const gltf = await new GLTFLoader().loadAsync(`/private-model?token=${encodeURIComponent(modelToken)}`);
       scene.add(gltf.scene);
       const box = new THREE.Box3().setFromObject(gltf.scene);
-      if (!box.isEmpty()) {
-        const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3()).length();
-        camera.position.copy(center).add(new THREE.Vector3(0, size * 0.15, Math.max(size, 5)));
-        camera.lookAt(center);
-        camera.far = Math.max(10000, size * 10);
-        camera.updateProjectionMatrix();
-      }
+      navigation.setScale(frameBounds(camera, box));
     } else {
       const cube = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 4), new THREE.MeshStandardMaterial({ color: 0x22bb66 }));
       cube.position.y = 2;
       scene.add(cube, new THREE.GridHelper(100, 50));
+      navigation.setScale(frameBounds(camera, new THREE.Box3().setFromObject(cube)));
     }
     peer = new RTCPeerConnection({ iceServers });
     window.peer = peer;
@@ -106,17 +99,9 @@ try {
   };
   setInterval(() => {
     const now = performance.now();
-    const dt = Math.min((now - lastTime) / 1000, 0.1);
+    const dt = (now - lastTime) / 1000;
     lastTime = now;
-    if (updated !== null && now - updated < 250) {
-      const move = new THREE.Vector3(Number(!!input.right) - Number(!!input.left),
-        Number(!!input.up) - Number(!!input.down),
-        Number(!!input.backward) - Number(!!input.forward));
-      if (move.lengthSq()) {
-        move.normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), camera.rotation.y);
-        camera.position.addScaledVector(move, dt * 5);
-      }
-    }
+    navigation.update(now, dt);
     const renderStart = performance.now();
     renderer.render(scene, camera);
     renderTime += performance.now() - renderStart;

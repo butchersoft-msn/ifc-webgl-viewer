@@ -7,6 +7,7 @@ let socket;
 let peer;
 let mouseX = 0;
 let mouseY = 0;
+let wheel = 0;
 let interval;
 let generation = 0;
 let mediaUrl;
@@ -15,6 +16,7 @@ function disconnect() {
   generation++;
   clearInterval(interval);
   keys.clear();
+  mouseX = mouseY = wheel = 0;
   peer?.close();
   socket?.close();
   video.srcObject = null;
@@ -136,25 +138,39 @@ form.addEventListener('submit', async event => {
     interval = setInterval(() => {
       const shift = keys.has('ShiftLeft') || keys.has('ShiftRight');
       send({
-        type: 'input', forward: (!shift && keys.has('ArrowUp')) || keys.has('KeyW'),
-        backward: (!shift && keys.has('ArrowDown')) || keys.has('KeyS'),
+        type: 'input', forward: keys.has('ArrowUp') || keys.has('KeyW'),
+        backward: keys.has('ArrowDown') || keys.has('KeyS'),
         left: keys.has('ArrowLeft') || keys.has('KeyA'),
         right: keys.has('ArrowRight') || keys.has('KeyD'),
-        up: shift && keys.has('ArrowUp'), down: shift && keys.has('ArrowDown'),
-        x: mouseX, y: mouseY,
+        up: keys.has('KeyE'), down: keys.has('KeyQ'), boost: shift,
+        x: mouseX, y: mouseY, wheel,
       });
-      mouseX = mouseY = 0;
+      mouseX = mouseY = wheel = 0;
     }, 50);
   } catch (error) {
     if (attempt === generation) { disconnect(); status.textContent = error.message; }
   }
 });
-const navigationKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight'];
+const navigationKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight'];
 document.addEventListener('keydown', event => {
   if (form.hidden && navigationKeys.includes(event.code)) { event.preventDefault(); keys.add(event.code); }
 });
 document.addEventListener('keyup', event => keys.delete(event.code));
-window.addEventListener('blur', () => { keys.clear(); mouseX = mouseY = 0; });
+function clearInput() {
+  keys.clear();
+  mouseX = mouseY = wheel = 0;
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'input', reset: true }));
+}
+window.addEventListener('blur', clearInput);
+video.addEventListener('wheel', event => {
+  if (form.hidden) {
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    event.preventDefault();
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? video.clientHeight || 720 : 1;
+    const delta = Number.isFinite(event.deltaY) ? Math.max(-500, Math.min(500, event.deltaY * unit)) : 0;
+    wheel = Math.max(-500, Math.min(500, wheel + delta));
+  }
+}, { passive: false });
 video.addEventListener('click', () => {
   void video.play().catch(() => {});
   if (form.hidden) video.requestPointerLock()?.catch(() => { status.textContent = 'Mouse lock unavailable'; });
@@ -165,8 +181,5 @@ document.addEventListener('mousemove', event => {
     mouseY += event.movementY;
   }
 });
-document.addEventListener('pointerlockchange', () => {
-  keys.clear();
-  mouseX = mouseY = 0;
-});
+document.addEventListener('pointerlockchange', clearInput);
 window.addEventListener('pagehide', disconnect);

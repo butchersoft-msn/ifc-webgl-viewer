@@ -21,7 +21,9 @@ npm start
 
 Open **http://127.0.0.1:3000**. With no `MODEL_PATH`, the viewer renders a demo scene. Use WASD or arrow keys to move; click the video for mouse look, and press Escape to release pointer lock.
 
-Hold Shift + Up/Down arrows to move vertically. Input is batched every 33 ms with at most one input RPC in flight; keyboard state is replaced by the latest state and mouse deltas are accumulated within bounded limits.
+Models and the demo cube start in a closer, perspective-aware view that fits their full bounds with a small margin. Navigation speed scales with model size. Hold Shift while moving with arrows or WASD (or vertically) to smoothly ramp from normal speed to an 8× cap over 3.5 seconds; releasing Shift or stopping resets the boost. Q moves down and E moves up, replacing the old Shift+arrow vertical controls.
+
+Scroll up over the video to approach and down to retreat along the viewing direction, including while mouse look is active; pointer lock is not required. Mouse wheels and trackpads are supported, with bounded sensitivity and Shift boost. Input is batched every 33 ms with at most one input RPC in flight; keyboard state is replaced by the latest state and mouse/wheel deltas are accumulated within bounded limits and consumed once. Blur, lost mouse lock, disconnect, and new sessions clear navigation state; stale input stops movement and resets acceleration after 250 ms.
 
 The HUD updates every 0.5 seconds with server-rendered FPS, average CPU render-call time, time since the renderer's last input update, and WebGL GPU vendor/model. Warnings appear below 20 FPS or above 40 ms average render time. Input update age is not end-to-end network/video latency, and CPU render time is not GPU execution time or utilization. A SwiftShader/software model name indicates software rendering; a hardware model name does not guarantee hardware video encoding. These diagnostics help identify slow rendering but cannot by themselves separate every CPU, GPU, encoding, or network bottleneck.
 
@@ -68,5 +70,7 @@ Each viewer incurs server rendering, encoding, memory, and bandwidth costs. GPU 
 Private model files are not delivered to clients, but visible pixels can be captured: this is **not DRM**. A shared password is not per-user account management.
 
 Linux Node 22 integration passed with sandbox-enabled software rendering, IFC conversion, decoded fallback video, navigation, session isolation, and private-route checks. `npm audit` reported zero vulnerabilities. The direct WebRTC path could not be validated because the runner returned no usable ICE candidates. Hardware GPU and Windows execution remain pending; follow the Windows checklist in [SETUP.md](SETUP.md).
+
+For the navigation update, `node --test test/navigation.test.js` passed all four deterministic tests (bounds fitting, acceleration/reset, facing-direction dolly, and client controls/wheel normalization). `CHROME_EXECUTABLE_PATH=/usr/bin/chromium CHROME_SOFTWARE_RENDERING=1 npm test` ran on Node 22: four passed and all four browser integration tests failed at Chromium launch with “No usable sandbox”, before streaming/session checks could execute. The sandbox was not disabled. JavaScript syntax and `git diff --check` passed; the locked dependency install reported zero audit vulnerabilities.
 
 Windows CI is `action_required`, awaiting maintainer approval; no Windows jobs have executed.
