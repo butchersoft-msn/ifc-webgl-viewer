@@ -10,11 +10,14 @@ body {
   overflow: hidden;
 }
 
-canvas {
+video {
   display: block;
   width: 100vw;
   height: 100vh;
+  object-fit: contain;
 }
+
+input, button { display: block; margin-top: 8px; padding: 6px; }
 
 .hud {
   position: fixed;
@@ -72,7 +75,7 @@ canvas {
 }
 
 /* Crosshair in center */
-canvas::after {
+body::after {
   content: '';
   position: fixed;
   top: 50%;

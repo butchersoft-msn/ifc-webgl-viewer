@@ -7,19 +7,21 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <canvas id="canvas"></canvas>
+  <video id="video" autoplay muted playsinline aria-label="Remote model view"></video>
   
   <div id="hud" class="hud">
     <div class="stats">
-      <div>FPS: <span id="fps">0</span></div>
-      <div>Latency: <span id="latency">0</span>ms</div>
-      <div>User ID: <span id="userId">--</span></div>
+      <form id="login">
+        <label for="password">Viewer password (if configured)</label>
+        <input id="password" type="password" autocomplete="current-password">
+        <button type="submit">Start viewing</button>
+      </form>
     </div>
     
     <div class="controls">
       <h3>Controls</h3>
       <p><strong>Movement:</strong> Arrow Keys or WASD</p>
-      <p><strong>Look:</strong> Click canvas, then move mouse</p>
+      <p><strong>Look:</strong> Click video, then move mouse</p>
       <p><strong>Exit Look:</strong> Press ESC</p>
     </div>
     

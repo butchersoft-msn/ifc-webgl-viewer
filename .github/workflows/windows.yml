@@ -1,0 +1,21 @@
+name: Windows Node 22 remote viewer
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      CHROME_SOFTWARE_RENDERING: '1'
+    steps:
+      - uses: actions/checkout@v4.3.0
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev
+      - run: npm test
