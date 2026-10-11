@@ -10,21 +10,25 @@
   <video id="video" autoplay muted playsinline aria-label="Remote model view"></video>
   
   <div id="hud" class="hud">
-    <div class="stats">
+    <div id="setupPanel" class="stats">
       <form id="login">
         <label for="password">Viewer password (if configured)</label>
         <input id="password" type="password" autocomplete="current-password">
-        <button type="submit">Start viewing</button>
+        <label for="model">Model (converted GLB)</label>
+        <select id="model" disabled><option value="">Default model / demo scene</option></select>
+        <button id="loadModels" type="button">Load available models</button>
+        <p id="modelStatus" role="status" aria-live="polite">Load models using the password above, if configured.</p>
+        <button id="startViewing" type="submit">Start Viewing</button>
       </form>
     </div>
     <section id="pausePanel" class="stats" aria-labelledby="pauseTitle" hidden>
       <h3 id="pauseTitle">Navigation paused</h3>
       <label><input id="wireframe" type="checkbox"> Wireframe model</label>
-      <button id="measure" type="button" aria-pressed="false">Measure distance</button>
       <p id="measurementStatus" role="status" aria-live="polite"></p>
       <button id="clearMeasurement" type="button">Clear / start again</button>
       <button id="cancelMeasurement" type="button">Cancel measurement</button>
       <button id="resume" type="button">Resume navigation</button>
+      <button id="showDiagnostics" type="button" aria-pressed="false">Show diagnostics</button>
     </section>
     <div id="diagnostics" class="stats" hidden>
       <h3>Renderer performance</h3>
@@ -36,7 +40,7 @@
       <div id="performanceWarning" role="status"></div>
     </div>
     
-    <div class="controls">
+    <div id="controlsHelp" class="controls">
       <h3>Controls</h3>
       <p><strong>Movement:</strong> Arrow Keys or WASD</p>
       <p><strong>Speed:</strong> Hold Shift while moving to progressively accelerate</p>
@@ -47,7 +51,18 @@
     </div>
     
     <div class="status">
-      <div id="connectionStatus" class="status-disconnected">● Disconnected</div>
+      <div id="connectionStatus" role="status" aria-live="polite">● Disconnected</div>
+    </div>
+    <div id="toolbar" role="group" aria-label="Viewer tools" hidden>
+      <button id="solid" type="button" aria-label="Solid view" title="Solid view" aria-pressed="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 5v10l-9 5-9-5V7z" fill="currentColor"/></svg>
+      </button>
+      <button id="wireframeTool" type="button" aria-label="Wireframe view" title="Wireframe view" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 5v10l-9 5-9-5V7zM3 7l9 5 9-5M12 12v10M12 2v10" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
+      <button id="measure" type="button" aria-label="Measure distance" title="Measure distance: pick two surfaces" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 16 13-13 5 5L8 21zM7 12l3 3M11 8l3 3M15 4l3 3" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
     </div>
   </div>
   

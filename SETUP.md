@@ -46,6 +46,21 @@ On Linux, Chromium needs the system libraries appropriate to your distribution a
 
 ## Load a private model
 
+To offer a model dropdown, create `model/` in the repository root (or configure `MODEL_DIRECTORY` to another private directory), then convert each source IFC offline into a self-contained GLB in that folder:
+
+```powershell
+New-Item -ItemType Directory -Force model
+npm run convert -- "C:\private\building.ifc" ".\model\building.glb"
+# Optional alternative catalog location:
+$env:MODEL_DIRECTORY = "C:\private\converted-models"
+```
+
+The folder must be outside `public/`. Only supported `.glb` files directly in the folder are listed; IFC files are not rendered directly or converted automatically. In the browser, enter the configured password, click **Load available models**, choose a model, then **Start Viewing**. Listing requires the same password/origin checks as starting a session. An empty/missing folder leaves the default model/demo available. Each user's selection is bound to that session's private renderer token; paths and geometry are never included in the catalog response.
+
+Use GLB version 2 with consistent header/chunk lengths and valid glTF JSON metadata (maximum 16 MiB). External buffer/image URLs are not supported; embedded data URIs are allowed. Invalid files are excluded and selected files are revalidated before session creation. Renderer-specific unsupported features can still produce a loading error.
+
+Setup hides only when the model is ready and video playback has begun. The compact toolbar provides solid, wireframe, and distance measurement controls. Click the video to navigate; press ESC to access options and release mouse lock before using tools. Measurement opens the existing two-surface picking instructions, clear/cancel controls, and result. Diagnostics stay hidden until **Show diagnostics** is selected in options. Connection failures restore setup so you can retry.
+
 Keep IFC and GLB files outside `public/`. Convert offline with the pure `web-ifc` WebAssembly converter, then configure the resulting self-contained GLB:
 
 ```powershell
