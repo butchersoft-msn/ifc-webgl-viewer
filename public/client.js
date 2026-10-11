@@ -9,11 +9,13 @@ let mouseY = 0;
 let interval;
 let generation = 0;
 let mediaUrl;
+let shiftPressed = false;
 
 function disconnect() {
   generation++;
   clearInterval(interval);
   keys.clear();
+  shiftPressed = false;
   peer?.close();
   socket?.close();
   video.srcObject = null;
@@ -121,10 +123,12 @@ form.addEventListener('submit', async event => {
     currentSocket.onerror = () => { status.textContent = 'Signaling connection failed'; };
     interval = setInterval(() => {
       send({
-        type: 'input', forward: keys.has('ArrowUp') || keys.has('KeyW'),
-        backward: keys.has('ArrowDown') || keys.has('KeyS'),
+        type: 'input', forward: (!shiftPressed && keys.has('ArrowUp')) || keys.has('KeyW'),
+        backward: (!shiftPressed && keys.has('ArrowDown')) || keys.has('KeyS'),
         left: keys.has('ArrowLeft') || keys.has('KeyA'),
-        right: keys.has('ArrowRight') || keys.has('KeyD'), x: mouseX, y: mouseY,
+        right: keys.has('ArrowRight') || keys.has('KeyD'),
+        up: shiftPressed && keys.has('ArrowUp'),
+        down: shiftPressed && keys.has('ArrowDown'), x: mouseX, y: mouseY,
       });
       mouseX = mouseY = 0;
     }, 50);
@@ -132,12 +136,16 @@ form.addEventListener('submit', async event => {
     if (attempt === generation) { disconnect(); status.textContent = error.message; }
   }
 });
-const navigationKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD'];
+const navigationKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight'];
 document.addEventListener('keydown', event => {
   if (form.hidden && navigationKeys.includes(event.code)) { event.preventDefault(); keys.add(event.code); }
+  shiftPressed = keys.has('ShiftLeft') || keys.has('ShiftRight');
 });
-document.addEventListener('keyup', event => keys.delete(event.code));
-window.addEventListener('blur', () => { keys.clear(); mouseX = mouseY = 0; });
+document.addEventListener('keyup', event => {
+  keys.delete(event.code);
+  shiftPressed = keys.has('ShiftLeft') || keys.has('ShiftRight');
+});
+window.addEventListener('blur', () => { keys.clear(); mouseX = mouseY = 0; shiftPressed = false; });
 video.addEventListener('click', () => {
   void video.play().catch(() => {});
   if (form.hidden) video.requestPointerLock()?.catch(() => { status.textContent = 'Mouse lock unavailable'; });
@@ -150,6 +158,7 @@ document.addEventListener('mousemove', event => {
 });
 document.addEventListener('pointerlockchange', () => {
   keys.clear();
+  shiftPressed = false;
   mouseX = mouseY = 0;
 });
 window.addEventListener('pagehide', disconnect);

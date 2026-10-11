@@ -19,7 +19,7 @@ npm install
 npm start
 ```
 
-Open **http://127.0.0.1:3000**. With no `MODEL_PATH`, the viewer renders a demo scene. Use WASD or arrow keys to move; click the video for mouse look, and press Escape to release pointer lock.
+Open **http://127.0.0.1:3000**. With no `MODEL_PATH`, the viewer renders a demo scene. Use WASD or arrow keys to move; hold Shift with Arrow Up/Down to move vertically. Arrow Left/Right still strafe while Shift is held. Click the video for mouse look, and press Escape to release pointer lock.
 
 `npm run dev` uses built-in `node --watch` (no nodemon). `npm test` runs the available Node built-in integration tests.
 

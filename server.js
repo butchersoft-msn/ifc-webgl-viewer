@@ -143,6 +143,7 @@ async function start(options = {}) {
           const input = {
             forward: message.forward === true, backward: message.backward === true,
             left: message.left === true, right: message.right === true,
+            up: message.up === true, down: message.down === true,
             x: Number.isFinite(message.x) ? Math.max(-500, Math.min(500, message.x)) : 0,
             y: Number.isFinite(message.y) ? Math.max(-500, Math.min(500, message.y)) : 0,
           };

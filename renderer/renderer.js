@@ -95,7 +95,8 @@ try {
     const dt = Math.min((now - lastTime) / 1000, 0.1);
     lastTime = now;
     if (now - updated < 250) {
-      const move = new THREE.Vector3(Number(!!input.right) - Number(!!input.left), 0,
+      const move = new THREE.Vector3(Number(!!input.right) - Number(!!input.left),
+        Number(!!input.up) - Number(!!input.down),
         Number(!!input.backward) - Number(!!input.forward));
       if (move.lengthSq()) {
         move.normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), camera.rotation.y);

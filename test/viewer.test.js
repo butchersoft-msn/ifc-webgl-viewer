@@ -88,6 +88,48 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
   assert.deepEqual(moved[1], positions[1]);
   await sessions[0].page.evaluate(() => window.setInput({ x: 80, y: 30 }));
   assert.notEqual(await sessions[0].page.evaluate(() => window.camera.rotation.y), await sessions[1].page.evaluate(() => window.camera.rotation.y));
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const position = () => sessions[0].page.evaluate(() => window.camera.position.toArray());
+  const move = async (key, axis, direction) => {
+    const before = await position();
+    await clients[0].keyboard.down(key);
+    await sessions[0].page.waitForFunction((axis, value, direction) =>
+      (window.camera.position.toArray()[axis] - value) * direction > 0.5,
+    { timeout: 5000, polling: 50 }, axis, before[axis], direction);
+    await clients[0].keyboard.up(key);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    return [before, await position()];
+  };
+  await clients[0].keyboard.down('ShiftLeft');
+  const [beforeUp, afterUp] = await move('ArrowUp', 1, 1);
+  assert.equal(afterUp[0], beforeUp[0]);
+  assert.equal(afterUp[2], beforeUp[2]);
+  const [beforeDown, afterDown] = await move('ArrowDown', 1, -1);
+  assert.equal(afterDown[0], beforeDown[0]);
+  assert.equal(afterDown[2], beforeDown[2]);
+  const [beforeStrafe, afterStrafe] = await move('ArrowRight', 0, 1);
+  assert.equal(afterStrafe[1], beforeStrafe[1]);
+  await clients[0].keyboard.up('ShiftLeft');
+  const [beforeForward, afterForward] = await move('ArrowUp', 2, -1);
+  assert.equal(afterForward[1], beforeForward[1]);
+  await clients[0].keyboard.down('ShiftRight');
+  const [beforeRightShift, afterRightShift] = await move('ArrowUp', 1, 1);
+  assert.equal(afterRightShift[0], beforeRightShift[0]);
+  assert.equal(afterRightShift[2], beforeRightShift[2]);
+  await clients[0].keyboard.up('ShiftRight');
+  assert.deepEqual(await sessions[1].page.evaluate(() => window.camera.position.toArray()), positions[1]);
+  await sessions[0].page.evaluate(() => {
+    const setInput = window.setInput;
+    window.setInput = value => { window.lastInput = value; setInput(value); };
+  });
+  await clients[0].evaluate(() => {
+    clearInterval(interval);
+    socket.send(JSON.stringify({ type: 'input', up: 'true', down: 1, x: 600, y: 0 }));
+  });
+  await sessions[0].page.waitForFunction(() => window.lastInput?.x === 500, { timeout: 5000 });
+  const validated = await sessions[0].page.evaluate(() => window.lastInput);
+  assert.equal(validated.up, false);
+  assert.equal(validated.down, false);
   await clients[0].close();
   await new Promise(resolve => setTimeout(resolve, 300));
   assert.equal(viewer.sessions.size, 1);
