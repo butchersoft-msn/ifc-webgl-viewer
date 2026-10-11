@@ -124,11 +124,13 @@ test('client maps Q/E and Shift and normalizes/clears one-shot viewer wheel inpu
   const listeners = new Map();
   const target = name => ({
     hidden: false, clientHeight: 720,
+    setAttribute() {}, focus() {},
     addEventListener: (event, fn) => listeners.set(`${name}:${event}`, fn),
   });
   const video = target('video');
   const form = target('login');
   const document = { getElementById: id => id === 'video' ? video : id === 'login' ? form : target(id),
+    exitPointerLock() { document.pointerLockElement = null; },
     addEventListener: (event, fn) => listeners.set(`document:${event}`, fn) };
   const sent = [];
   let tick;
@@ -150,6 +152,8 @@ test('client maps Q/E and Shift and normalizes/clears one-shot viewer wheel inpu
   };
   assert.equal(wheel(-100), false, 'Inactive viewer leaves page scrolling alone');
   form.hidden = true;
+  document.pointerLockElement = video;
+  vm.runInContext('paused = false', context);
   assert.equal(wheel(-10), true);
   wheel(-2, 1);
   assert.equal(vm.runInContext('wheel', context), -42);
@@ -161,7 +165,10 @@ test('client maps Q/E and Shift and normalizes/clears one-shot viewer wheel inpu
   assert.equal(vm.runInContext('wheel', context), 500);
   listeners.get('window:blur')();
   assert.equal(vm.runInContext('wheel', context), 0);
+  assert.equal(JSON.stringify(sent.pop()), '{"type":"pause","paused":true}');
   assert.equal(JSON.stringify(sent.pop()), '{"type":"input","reset":true}');
+  document.pointerLockElement = video;
+  vm.runInContext('paused = false', context);
   for (const code of ['KeyQ', 'KeyE', 'ShiftLeft', 'ArrowUp']) {
     let prevented = false;
     listeners.get('document:keydown')({ code, preventDefault() { prevented = true; } });
@@ -179,6 +186,8 @@ test('client maps Q/E and Shift and normalizes/clears one-shot viewer wheel inpu
   });
   video.removeAttribute = () => {};
   await listeners.get('login:submit')({ preventDefault() {} });
+  document.pointerLockElement = video;
+  vm.runInContext('paused = false', context);
   for (const code of ['ShiftLeft', 'ArrowUp', 'KeyE']) {
     listeners.get('document:keydown')({ code, preventDefault() {} });
   }

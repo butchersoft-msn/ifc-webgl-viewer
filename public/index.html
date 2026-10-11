@@ -17,6 +17,15 @@
         <button type="submit">Start viewing</button>
       </form>
     </div>
+    <section id="pausePanel" class="stats" aria-labelledby="pauseTitle" hidden>
+      <h3 id="pauseTitle">Navigation paused</h3>
+      <label><input id="wireframe" type="checkbox"> Wireframe model</label>
+      <button id="measure" type="button" aria-pressed="false">Measure distance</button>
+      <p id="measurementStatus" role="status" aria-live="polite"></p>
+      <button id="clearMeasurement" type="button">Clear / start again</button>
+      <button id="cancelMeasurement" type="button">Cancel measurement</button>
+      <button id="resume" type="button">Resume navigation</button>
+    </section>
     <div id="diagnostics" class="stats" hidden>
       <h3>Renderer performance</h3>
       <div>FPS: <span id="fps">—</span></div>
@@ -34,7 +43,7 @@
       <p><strong>Vertical:</strong> Q down / E up</p>
       <p><strong>Zoom:</strong> Scroll over video (up approaches, down retreats)</p>
       <p><strong>Look:</strong> Click video, then move mouse</p>
-      <p><strong>Exit Look:</strong> Press ESC</p>
+      <p><strong>Pause / options:</strong> Press ESC</p>
     </div>
     
     <div class="status">

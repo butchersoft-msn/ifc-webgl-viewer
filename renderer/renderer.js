@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from './GLTFLoader.js';
 import { frameBounds, createNavigation } from './navigation.mjs';
+import { createViewerTools } from './viewer-tools.mjs';
 
 try {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -16,6 +17,8 @@ try {
   camera.rotation.order = 'YXZ';
   camera.position.set(0, 2, 12);
   const navigation = createNavigation(camera);
+  const tools = createViewerTools(scene, camera);
+  let paused = true;
   let updated = null;
   let lastTime = performance.now();
   let statsTime = lastTime;
@@ -27,8 +30,22 @@ try {
   let fallback = false;
   const pendingIce = [];
   window.setInput = value => {
+    if (paused && value?.reset !== true) return;
     updated = performance.now();
     navigation.setInput(value, updated);
+  };
+  window.viewerCommand = message => {
+    if (message && !Array.isArray(message) && message.type === 'pause' &&
+        typeof message.paused === 'boolean') {
+      paused = message.paused;
+      window.setInput({ reset: true });
+    }
+    const response = tools.command(message);
+    if (response?.type === 'measurement') {
+      paused = true;
+      window.setInput({ reset: true });
+    }
+    return response;
   };
   window.acceptAnswer = async sdp => {
     if (fallback) return;
@@ -53,12 +70,14 @@ try {
     if (hasModel) {
       const gltf = await new GLTFLoader().loadAsync(`/private-model?token=${encodeURIComponent(modelToken)}`);
       scene.add(gltf.scene);
+      tools.setModel(gltf.scene);
       const box = new THREE.Box3().setFromObject(gltf.scene);
       navigation.setScale(frameBounds(camera, box));
     } else {
       const cube = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 4), new THREE.MeshStandardMaterial({ color: 0x22bb66 }));
       cube.position.y = 2;
       scene.add(cube, new THREE.GridHelper(100, 50));
+      tools.setModel(cube);
       navigation.setScale(frameBounds(camera, new THREE.Box3().setFromObject(cube)));
     }
     peer = new RTCPeerConnection({ iceServers });
