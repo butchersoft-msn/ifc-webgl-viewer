@@ -1,311 +1,118 @@
-# Setup Instructions
+# Prototype setup
 
-## Quick Start (5 minutes)
+Requires **Node.js >=22.12**. `npm test` runs Node built-in integration tests. Linux Node 22 integration passed with sandbox-enabled software rendering, IFC conversion, decoded fallback video, navigation, session isolation, and private-route checks; `npm audit` reported zero vulnerabilities. Direct WebRTC could not be validated because the runner returned no usable ICE candidates. Hardware GPU and Windows execution remain pending.
 
-### Step 1: Install Node.js
+## Windows (PowerShell)
 
-Download and install from https://nodejs.org/ (LTS version recommended)
+Install [NVM for Windows](https://github.com/coreybutler/nvm-windows), then use an elevated terminal if required:
 
-Verify installation:
-```bash
+```powershell
+nvm install 22
+nvm list
+```
+
+Run `nvm use` with the **actual installed 22.x version** shown by `nvm list` (at least 22.12.0), for example `nvm use 22.22.0` only if that exact version is installed.
+
+```powershell
 node --version
 npm --version
+Set-Location "C:\path\to\ifc-webgl-viewer"
 ```
 
-### Step 2: Download and Extract
+If replacing the old prototype package, remove its dependencies and lockfile before installing the new package:
 
-**Option A: Using Git**
-```bash
-git clone https://github.com/butchersoft-msn/ifc-webgl-viewer.git
-cd ifc-webgl-viewer
-```
-
-**Option B: Download ZIP**
-- Click "Code" → "Download ZIP"
-- Extract to a folder
-- Open terminal/command prompt in that folder
-
-### Step 3: Install Dependencies
-
-```bash
+```powershell
+if (Test-Path node_modules) { Remove-Item node_modules -Recurse -Force }
+if (Test-Path package-lock.json) { Remove-Item package-lock.json -Force }
 npm install
-```
-
-This will download and install:
-- Express (web server)
-- WebSocket (real-time communication)
-- Three.js (3D rendering)
-- Canvas (GPU rendering)
-
-**⏱️ This may take 2-5 minutes** (canvas package compiles)
-
-### Step 4: Start the Server
-
-```bash
 npm start
 ```
 
-You should see:
-```
-========================================
-IFC WebGL Viewer - Local Prototype
-========================================
-HTTP Server running on http://localhost:3000
-WebSocket Server running on ws://localhost:8080
-```
+For a fresh checkout, just run `npm install` and `npm start`. Open **http://127.0.0.1:3000**. Puppeteer uses Chromium for server rendering; installation may download a browser. The old native `canvas` package is not part of this architecture.
 
-### Step 5: Open in Browser
+For development, `npm run dev` uses built-in `node --watch`; nodemon is not required.
 
-1. Open your browser (Chrome, Firefox, Edge, Safari)
-2. Go to: **http://localhost:3000**
-3. Click the canvas to enable mouse look
-4. Use **Arrow Keys** or **WASD** to move
-5. Move mouse to look around
-6. Press **ESC** to exit mouse lock
+## Linux / macOS
 
-### Step 6: Test Multi-User
+Install Node >=22.12, then in the project directory:
 
-Open a **second browser tab/window** at `http://localhost:3000`
-
-You should see two independent viewers. Each user gets their own camera position.
-
----
-
-## Detailed Setup by OS
-
-### Windows
-
-1. **Install Node.js LTS**
-   - Download from nodejs.org
-   - Run installer, click "Next" through all options
-   - Restart your computer
-
-2. **Open Command Prompt** (Win+R → `cmd`)
-
-3. **Navigate to project folder**
-   ```cmd
-   cd C:\path\to\ifc-webgl-viewer
-   ```
-
-4. **Install dependencies**
-   ```cmd
-   npm install
-   ```
-   
-   If `canvas` build fails:
-   - Install Visual Studio Build Tools (free, C++ workload only)
-   - Restart terminal and retry
-
-5. **Start server**
-   ```cmd
-   npm start
-   ```
-
-6. **Open browser**: http://localhost:3000
-
-### macOS
-
-1. **Install Node.js LTS**
-   - Download from nodejs.org or use Homebrew:
-   ```bash
-   brew install node
-   ```
-
-2. **Open Terminal** (Cmd+Space → `terminal`)
-
-3. **Navigate to project folder**
-   ```bash
-   cd ~/path/to/ifc-webgl-viewer
-   ```
-
-4. **Install dependencies**
-   ```bash
-   npm install
-   ```
-   
-   If `canvas` build fails:
-   ```bash
-   xcode-select --install
-   npm install
-   ```
-
-5. **Start server**
-   ```bash
-   npm start
-   ```
-
-6. **Open browser**: http://localhost:3000
-
-### Linux (Ubuntu/Debian)
-
-1. **Install Node.js LTS**
-   ```bash
-   curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-   sudo apt-get install -y nodejs
-   ```
-
-2. **Install build tools** (needed for canvas)
-   ```bash
-   sudo apt-get install build-essential python3
-   ```
-
-3. **Navigate to project folder**
-   ```bash
-   cd ~/path/to/ifc-webgl-viewer
-   ```
-
-4. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-5. **Start server**
-   ```bash
-   npm start
-   ```
-
-6. **Open browser**: http://localhost:3000
-
----
-
-## Adding Your IFC File
-
-### Export from Revit
-
-1. Open your Revit project
-2. **File** → **Export** → **IFC**
-3. Choose location and save as `model.ifc`
-4. Leave default IFC export settings
-
-### Add to Viewer
-
-1. Copy the IFC file to the `public/` folder:
-   ```bash
-   cp ~/Desktop/model.ifc ./public/model.ifc
-   ```
-
-2. The viewer currently displays a placeholder. To load your IFC:
-   - Edit `server.js` line ~95
-   - See README.md "Next Steps" for full IFC loading implementation
-
----
-
-## Stopping the Server
-
-**In terminal/command prompt:**
-
-- Press `Ctrl+C` to stop
-- This closes all active connections and shuts down cleanly
-
----
-
-## Common Issues
-
-### Port Already in Use
-
-**Error**: `EADDRINUSE: address already in use :::3000`
-
-**Solution**: Change port in `server.js`:
-```javascript
-const HTTP_PORT = 3001;  // Use 3001 instead
-const WS_PORT = 8081;     // Use 8081 instead
-```
-
-Then access at http://localhost:3001
-
-### Connection Refused
-
-**Error**: WebSocket fails to connect
-
-**Causes**:
-- Server not running
-- Firewall blocking ports
-- Running on different machine?
-
-**Solutions**:
-- Verify `npm start` output shows "WebSocket Server running"
-- Check firewall: allow Node.js through Windows/Mac firewall
-- If accessing from another PC, replace `localhost` with server's IP
-
-### Canvas Install Fails
-
-**Error**: `node-gyp ERR!` during `npm install`
-
-**Solution**:
-
-**Windows**:
-- Install Visual Studio Build Tools (free)
-- Choose "Desktop development with C++"
-- Restart terminal and run `npm install` again
-
-**macOS**:
-```bash
-xcode-select --install
+```sh
+node --version
 npm install
+npm start
 ```
 
-**Linux**:
-```bash
-sudo apt-get install build-essential python3
-npm install
+On Linux, Chromium needs the system libraries appropriate to your distribution and a working sandbox. Resolve missing libraries or sandbox configuration rather than disabling the sandbox. macOS verification is not claimed here.
+
+## Load a private model
+
+Keep IFC and GLB files outside `public/`. Convert offline with the pure `web-ifc` WebAssembly converter, then configure the resulting self-contained GLB:
+
+```powershell
+npm run convert -- "C:\private\model.ifc" "C:\private\model.glb"
+$env:MODEL_PATH = "C:\private\model.glb"
+npm start
 ```
 
-### Low FPS / Laggy
+The converter exclusively creates the output GLB and refuses to overwrite existing files. Before reconversion, deliberately delete the old output (for example, `Remove-Item "C:\private\model.glb"` in PowerShell), or choose a new output path.
 
-**Check**:
-1. GPU usage: `nvidia-smi` (should be >50% utilized)
-2. Server logs for errors
-3. Close other GPU applications (games, video editors)
-4. Reduce number of concurrent users
-5. Check network bandwidth
+On Linux/macOS:
 
----
+```sh
+npm run convert -- "/private/model.ifc" "/private/model.glb"
+MODEL_PATH="/private/model.glb" npm start
+```
 
-## Next: Multi-User Testing
+Without `MODEL_PATH`, a demo scene is used. GLB files must not depend on external assets. Conversion is geometry-only, not complete BIM metadata/material preservation; huge models may exhaust memory. Private renderer URLs use an intercepted loopback origin: Puppeteer fulfills virtual requests only inside server Chromium, and no HTTP endpoint actually serves models. Viewers can capture visible pixels; this is not DRM.
 
-Once working locally, test with multiple concurrent users:
+## Video transport
 
-1. **Terminal 1**: `npm start` (leave running)
-2. **Browser 1**: http://localhost:3000 (User A)
-3. **Browser 2**: http://localhost:3000 (User B)
-4. **Browser 3**: http://localhost:3000 (User C)
+WebRTC is preferred. If it has not connected after **5 seconds**, video automatically falls back over the authenticated same-origin WebSocket. Chromium `MediaRecorder` encodes the server canvas as WebM; the client's built-in `MediaSource` plays it in a video element. This requires `MediaSource` support for `video/webm` VP8 and is not universal. There is no base64 JPEG streaming or client geometry in either mode.
 
-Each browser should display independently. Server logs show active user count.
+## Environment and external access
 
----
+Local PowerShell examples (set only the options you need):
 
-## Performance Expectations
+```powershell
+$env:HOST = "127.0.0.1"
+$env:PORT = "3000"
+$env:MAX_SESSIONS = "4"
+$env:VIEWER_PASSWORD = Read-Host "Shared viewer password"
+# Optional: use an existing compatible Chromium installation
+$env:CHROME_EXECUTABLE_PATH = "C:\path\to\chrome.exe"
+# Explicit software rendering fallback, if needed
+$env:CHROME_SOFTWARE_RENDERING = "1"
+npm start
+```
 
-**RTX 4090 Ti (16GB):**
-- 8-12+ concurrent users
-- 1080p @ 30 FPS per user
-- ~2-5 Mbps bandwidth per user
-- 50-80ms latency
+`VIEWER_PASSWORD` enables shared login via `POST /session` with a `password` field. Sessions use a non-shareable HttpOnly cookie, expire after one hour, and permit one WebSocket per session. Independent viewers need separate browser profiles/private contexts.
 
-**RTX 3080 (10GB):**
-- 4-6 concurrent users
-- 1080p @ 30 FPS per user
+For external access, configure an HTTPS reverse proxy that forwards to the server and supports same-origin WebSocket upgrades. When `HOST` is not loopback, `APP_ORIGIN` is required and must match the public origin:
 
-**RTX 2080 (8GB):**
-- 2-4 concurrent users
-- 1080p @ 30 FPS per user
+```powershell
+$env:HOST = "0.0.0.0"
+$env:APP_ORIGIN = "https://viewer.example.com"
+$env:ICE_SERVERS = '[{"urls":"stun:stun.example.com:3478"},{"urls":"turn:turn.example.com:3478","username":"replace-me","credential":"replace-me"}]'
+npm start
+```
 
-If you're only getting 2-3 users on a high-end GPU, check:
-- CPU usage (may be the bottleneck)
-- Memory pressure (check `nvidia-smi`)
-- Network bandwidth
+Replace example ICE endpoints/credentials with your STUN/TURN service. `ICE_SERVERS` is a JSON array of `RTCIceServer` objects. Allow WebRTC UDP connectivity or provide a reachable TURN relay: an HTTPS/WebSocket proxy does not relay WebRTC media. The automatic WebM fallback uses the proxied WebSocket on supported browsers. Keep passwords and TURN credentials out of source control.
 
----
+## Troubleshooting and Windows verification
 
-## Getting Help
+- Install errors: confirm the active Node version and check Puppeteer's browser download/network access.
+- Chromium launch errors: check system dependencies or `CHROME_EXECUTABLE_PATH`; do not disable its sandbox.
+- Signaling failure: check `APP_ORIGIN`, login/cookies, and proxy WebSocket upgrade handling. There is no separate port 8080.
+- Connected but no video: inspect browser/server logs and ICE connectivity; check UDP/firewall/TURN configuration. After 5 seconds without WebRTC, check WebSocket fallback delivery and `MediaSource` WebM/VP8 support.
+- Slow rendering: reduce concurrent sessions/model size and inspect CPU, memory, GPU, and network use. Each session has rendering/encoding costs. GPU use is not guaranteed, SwiftShader is software, and Chromium encoding does not promise NVENC.
 
-If you encounter issues:
+Windows verification checklist (not a record of completed tests):
 
-1. **Check the server logs** - they show detailed error messages
-2. **Check browser console** - F12 → Console tab
-3. **Review troubleshooting section** in README.md
-4. **GitHub Issues**: https://github.com/butchersoft-msn/ifc-webgl-viewer/issues
-
----
-
-**You're all set! Happy model viewing! 🎉**
+- [ ] Confirm Node >=22.12 and successful `npm install` from the replacement package.
+- [ ] Start on `127.0.0.1:3000`; verify demo video, WASD/arrows, mouse look, and Escape.
+- [ ] Convert a private IFC and view its self-contained GLB via `MODEL_PATH`.
+- [ ] Verify shared-password login, one WebSocket per session, independent browser contexts, one-hour expiration, and the configured session limit.
+- [ ] Confirm clients cannot download source IFC/GLB or server-only renderer assets.
+- [ ] Verify HTTPS proxy upgrades and WebRTC connectivity across the intended network, including TURN where needed.
+- [ ] With WebRTC unavailable, verify automatic WebM fallback after 5 seconds on a browser supporting `MediaSource` WebM/VP8.
+- [ ] Check Chromium rendering mode and resource use; stop with Ctrl+C.

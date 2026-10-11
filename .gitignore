@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
 yarn.lock
 
 # Environment
@@ -29,6 +28,10 @@ Thumbs.db
 dist/
 build/
 
-# Models (optional - uncomment to ignore large IFC files)
-# *.ifc
-# *.rvt
+# Private models
+private/
+*.ifc
+*.rvt
+*.glb
+*.gltf
+*.obj
