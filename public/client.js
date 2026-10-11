@@ -1,6 +1,7 @@
 const video = document.getElementById('video');
 const status = document.getElementById('connectionStatus');
 const form = document.getElementById('login');
+const diagnostics = document.getElementById('diagnostics');
 const keys = new Set();
 let socket;
 let peer;
@@ -21,6 +22,7 @@ function disconnect() {
   if (mediaUrl) URL.revokeObjectURL(mediaUrl);
   mediaUrl = null;
   form.hidden = false;
+  diagnostics.hidden = true;
 }
 form.addEventListener('submit', async event => {
   event.preventDefault();
@@ -110,6 +112,18 @@ form.addEventListener('submit', async event => {
           }, { once: true });
           status.textContent = 'Video: WebSocket fallback';
           void video.play().catch(() => { status.textContent = 'Click video to play'; });
+        } else if (message.type === 'stats') {
+          diagnostics.hidden = false;
+          document.getElementById('fps').textContent = message.fps.toFixed(1);
+          document.getElementById('renderTime').textContent = `${message.renderTime.toFixed(1)} ms`;
+          document.getElementById('inputLatency').textContent = message.inputLatency === null
+            ? 'No input yet' : `${message.inputLatency.toFixed(1)} ms`;
+          document.getElementById('gpuVendor').textContent = message.gpu.vendor;
+          document.getElementById('gpuRenderer').textContent = message.gpu.renderer;
+          document.getElementById('performanceWarning').textContent = [
+            message.fps < 20 ? 'Low FPS (<20)' : '',
+            message.renderTime > 40 ? 'Slow render (>40 ms)' : '',
+          ].filter(Boolean).join(' · ');
         } else if (message.type === 'error') throw new Error(message.message);
       }).catch(error => {
         if (attempt === generation) { disconnect(); status.textContent = error.message; }
@@ -120,11 +134,14 @@ form.addEventListener('submit', async event => {
     };
     currentSocket.onerror = () => { status.textContent = 'Signaling connection failed'; };
     interval = setInterval(() => {
+      const shift = keys.has('ShiftLeft') || keys.has('ShiftRight');
       send({
-        type: 'input', forward: keys.has('ArrowUp') || keys.has('KeyW'),
-        backward: keys.has('ArrowDown') || keys.has('KeyS'),
+        type: 'input', forward: (!shift && keys.has('ArrowUp')) || keys.has('KeyW'),
+        backward: (!shift && keys.has('ArrowDown')) || keys.has('KeyS'),
         left: keys.has('ArrowLeft') || keys.has('KeyA'),
-        right: keys.has('ArrowRight') || keys.has('KeyD'), x: mouseX, y: mouseY,
+        right: keys.has('ArrowRight') || keys.has('KeyD'),
+        up: shift && keys.has('ArrowUp'), down: shift && keys.has('ArrowDown'),
+        x: mouseX, y: mouseY,
       });
       mouseX = mouseY = 0;
     }, 50);
@@ -132,7 +149,7 @@ form.addEventListener('submit', async event => {
     if (attempt === generation) { disconnect(); status.textContent = error.message; }
   }
 });
-const navigationKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD'];
+const navigationKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight'];
 document.addEventListener('keydown', event => {
   if (form.hidden && navigationKeys.includes(event.code)) { event.preventDefault(); keys.add(event.code); }
 });

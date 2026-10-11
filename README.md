@@ -21,6 +21,10 @@ npm start
 
 Open **http://127.0.0.1:3000**. With no `MODEL_PATH`, the viewer renders a demo scene. Use WASD or arrow keys to move; click the video for mouse look, and press Escape to release pointer lock.
 
+Hold Shift + Up/Down arrows to move vertically. Input is batched every 33 ms with at most one input RPC in flight; keyboard state is replaced by the latest state and mouse deltas are accumulated within bounded limits.
+
+The HUD updates every 0.5 seconds with server-rendered FPS, average CPU render-call time, time since the renderer's last input update, and WebGL GPU vendor/model. Warnings appear below 20 FPS or above 40 ms average render time. Input update age is not end-to-end network/video latency, and CPU render time is not GPU execution time or utilization. A SwiftShader/software model name indicates software rendering; a hardware model name does not guarantee hardware video encoding. These diagnostics help identify slow rendering but cannot by themselves separate every CPU, GPU, encoding, or network bottleneck.
+
 `npm run dev` uses built-in `node --watch` (no nodemon). `npm test` runs the available Node built-in integration tests.
 
 ## Private models

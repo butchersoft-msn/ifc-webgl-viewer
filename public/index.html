@@ -17,10 +17,20 @@
         <button type="submit">Start viewing</button>
       </form>
     </div>
+    <div id="diagnostics" class="stats" hidden>
+      <h3>Renderer performance</h3>
+      <div>FPS: <span id="fps">—</span></div>
+      <div>Render (CPU): <span id="renderTime">—</span></div>
+      <div>Input latency (update age): <span id="inputLatency">—</span></div>
+      <div>GPU vendor: <span id="gpuVendor">—</span></div>
+      <div>GPU model: <span id="gpuRenderer">—</span></div>
+      <div id="performanceWarning" role="status"></div>
+    </div>
     
     <div class="controls">
       <h3>Controls</h3>
       <p><strong>Movement:</strong> Arrow Keys or WASD</p>
+      <p><strong>Vertical:</strong> Shift + ↑ / ↓</p>
       <p><strong>Look:</strong> Click video, then move mouse</p>
       <p><strong>Exit Look:</strong> Press ESC</p>
     </div>

@@ -15,8 +15,13 @@ try {
   camera.rotation.order = 'YXZ';
   camera.position.set(0, 2, 12);
   let input = {};
-  let updated = 0;
+  let updated = null;
   let lastTime = performance.now();
+  let statsTime = lastTime;
+  let frames = 0;
+  let renderTime = 0;
+  let gpu;
+  let statsSending = false;
   let peer;
   let fallback = false;
   const pendingIce = [];
@@ -36,7 +41,16 @@ try {
     if (peer.remoteDescription) await peer.addIceCandidate(candidate);
     else pendingIce.push(candidate);
   };
-  window.startStream = async ({ iceServers, hasModel, modelToken }) => {
+  window.getGPUInfo = () => {
+    const gl = renderer.getContext();
+    const debug = gl.getExtension('WEBGL_debug_renderer_info');
+    return {
+      vendor: gl.getParameter(debug ? debug.UNMASKED_VENDOR_WEBGL : gl.VENDOR),
+      renderer: gl.getParameter(debug ? debug.UNMASKED_RENDERER_WEBGL : gl.RENDERER),
+    };
+  };
+  window.startStream = async ({ iceServers, hasModel, modelToken, gpu: gpuInfo }) => {
+    gpu = gpuInfo;
     if (hasModel) {
       const gltf = await new GLTFLoader().loadAsync(`/private-model?token=${encodeURIComponent(modelToken)}`);
       scene.add(gltf.scene);
@@ -94,16 +108,33 @@ try {
     const now = performance.now();
     const dt = Math.min((now - lastTime) / 1000, 0.1);
     lastTime = now;
-    if (now - updated < 250) {
-      const move = new THREE.Vector3(Number(!!input.right) - Number(!!input.left), 0,
+    if (updated !== null && now - updated < 250) {
+      const move = new THREE.Vector3(Number(!!input.right) - Number(!!input.left),
+        Number(!!input.up) - Number(!!input.down),
         Number(!!input.backward) - Number(!!input.forward));
       if (move.lengthSq()) {
         move.normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), camera.rotation.y);
         camera.position.addScaledVector(move, dt * 5);
       }
     }
+    const renderStart = performance.now();
     renderer.render(scene, camera);
+    renderTime += performance.now() - renderStart;
+    frames++;
   }, 1000 / 30);
+  setInterval(() => {
+    const now = performance.now();
+    const stats = {
+      type: 'stats', fps: frames * 1000 / (now - statsTime),
+      renderTime: frames ? renderTime / frames : 0,
+      inputLatency: updated === null ? null : now - updated, gpu,
+    };
+    frames = renderTime = 0;
+    statsTime = now;
+    if (!gpu || statsSending) return;
+    statsSending = true;
+    void window.sendSignal(stats).catch(() => {}).finally(() => { statsSending = false; });
+  }, 500);
   // Expose diagnostic state only within the private Puppeteer page.
   window.camera = camera;
   window.rendererReady = true;
