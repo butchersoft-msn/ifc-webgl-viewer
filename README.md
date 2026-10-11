@@ -83,4 +83,6 @@ Linux Node 22 integration passed with sandbox-enabled software rendering, IFC co
 
 For the navigation update, `node --test test/navigation.test.js` passed all four deterministic tests (bounds fitting, acceleration/reset, facing-direction dolly, and client controls/wheel normalization). `CHROME_EXECUTABLE_PATH=/usr/bin/chromium CHROME_SOFTWARE_RENDERING=1 npm test` ran on Node 22: four passed and all four browser integration tests failed at Chromium launch with “No usable sandbox”, before streaming/session checks could execute. The sandbox was not disabled. JavaScript syntax and `git diff --check` passed; the locked dependency install reported zero audit vulnerabilities.
 
-Windows CI is `action_required`, awaiting maintainer approval; no Windows jobs have executed.
+For the paused-viewer update, deterministic client/navigation, authenticated command handling (with a renderer test double), and private Three.js tool tests passed. Browser integration was attempted with sandbox-enabled Chromium but failed at launch with “No usable sandbox”, before streamed checks could run. WebRTC/fallback visual checks remain pending in a sandbox-capable environment; the full browser suite was not rerun after that launch failure. CodeQL reported zero alerts. Automated review was unavailable due to its configured model; a separate read-only review checked the changes.
+
+The current PR's Windows CI is `action_required`, awaiting maintainer approval.

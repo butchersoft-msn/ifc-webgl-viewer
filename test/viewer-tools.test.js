@@ -123,6 +123,31 @@ test('only visible model meshes are picked; scene helpers and material-hidden fa
   assert.equal(measure('pick').status, 'no-hit', 'Endpoint markers are not pick targets');
 });
 
+test('picks exclude camera-clipped surfaces using depth, including off-center rays', () => {
+  const { camera, model, mesh, measure, helpers } = fixture();
+  camera.near = 2;
+  camera.far = 12;
+  camera.position.set(3, 2, 10);
+  model.position.set(3, 2, 0);
+  const clipped = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), mesh.material);
+  clipped.position.z = 9;
+  model.add(clipped);
+  measure('start');
+  assert.equal(measure('pick', 0.75).status, 'second');
+  assert.ok(Math.abs(helpers.children[0].position.z) < 1e-10,
+    'Near-clipped surface is skipped in favor of the visible surface behind it');
+
+  measure('clear');
+  mesh.position.z = -3;
+  assert.equal(measure('pick', 0.75).status, 'no-hit', 'Surface beyond far clip is excluded');
+  assert.equal(helpers.children.length, 0);
+
+  mesh.position.z = -1.9;
+  assert.equal(measure('pick', 0.75).status, 'second',
+    'Visible off-center surface remains pickable even when ray distance exceeds far');
+  assert.ok(Math.abs(helpers.children[0].position.z + 1.9) < 1e-10);
+});
+
 test('clear, cancel, model replacement and repeated commands dispose all helper resources once', () => {
   const { scene, model, mesh, tools, measure, helpers } = fixture();
   for (const action of ['clear', 'cancel', 'start', 'replace']) {

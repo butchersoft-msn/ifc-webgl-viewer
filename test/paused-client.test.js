@@ -88,6 +88,22 @@ test('measurement clicks map contained video pixels and never request pointer lo
   assert.equal(c.locks(), 0);
 });
 
+test('pointer lock failure and late lock acquisition leave navigation paused', async () => {
+  const c = await client();
+  c.video.requestPointerLock = () => Promise.reject(new Error('Denied'));
+  c.fire('resume', 'click');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(c.run('paused'), true);
+  assert.match(c.element('connectionStatus').textContent, /Mouse lock unavailable/);
+  c.video.requestPointerLock = () => {};
+  c.fire('resume', 'click');
+  c.fire('window', 'blur');
+  c.document.pointerLockElement = c.video;
+  c.fire('document', 'pointerlockchange');
+  assert.equal(c.run('paused'), true);
+  assert.equal(c.document.pointerLockElement, null);
+});
+
 test('late measurement responses cannot repopulate cleared or disconnected state', async () => {
   const c = await client();
   Object.assign(c.context, {

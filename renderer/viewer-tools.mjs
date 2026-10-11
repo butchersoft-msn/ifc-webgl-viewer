@@ -70,10 +70,11 @@ export function createViewerTools(scene, camera) {
       if (object.isMesh && visible(object)) meshes.push(object);
     });
     const hit = raycaster.intersectObjects(meshes, false).find(intersection => {
+      const depth = -intersection.point.clone().applyMatrix4(camera.matrixWorldInverse).z;
       const material = Array.isArray(intersection.object.material)
         ? intersection.object.material[intersection.face.materialIndex]
         : intersection.object.material;
-      return material?.visible !== false &&
+      return depth >= camera.near && depth <= camera.far && material?.visible !== false &&
         intersection.point.toArray().every(Number.isFinite);
     });
     return hit?.point.clone() ?? null;
