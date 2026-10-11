@@ -66,7 +66,7 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
     page.on('request', req => requests.push(req.url()));
     await page.goto(viewer.origin);
     await page.type('#password', 'test-password');
-    await page.click('button');
+    await page.click('#startViewing');
     await page.bringToFront();
     await page.waitForFunction(() => {
       const video = document.querySelector('video');
@@ -81,6 +81,9 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
     });
     assert.ok(requests.every(url => ['/', '/client.js', '/styles.css', '/session', '/favicon.ico'].includes(new URL(url).pathname)), requests.join('\n'));
     clients.push(page);
+    await page.waitForFunction(() => document.getElementById('login').hidden);
+    assert.equal(await page.$eval('#toolbar', element => element.hidden), false);
+    assert.equal(await page.$eval('#diagnostics', element => element.hidden), true);
   }
   assert.equal(viewer.sessions.size, 2);
   const sessions = [...viewer.sessions.values()];
@@ -103,7 +106,7 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
   } }));
   const positions = await Promise.all(sessions.map(session => session.page.evaluate(() => window.camera.position.toArray())));
   assert.deepEqual(positions[0], positions[1]);
-  await clients[0].click('#resume');
+  await clients[0].click('#video');
   await clients[0].waitForFunction(() => document.pointerLockElement === video);
   await clients[0].keyboard.down('ArrowUp');
   await new Promise(resolve => setTimeout(resolve, 600));
@@ -111,6 +114,8 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
   const moved = await Promise.all(sessions.map(session => session.page.evaluate(() => window.camera.position.toArray())));
   assert.notDeepEqual(moved[0], positions[0]);
   assert.deepEqual(moved[1], positions[1]);
+  await clients[0].keyboard.press('Escape');
+  await clients[0].click('#showDiagnostics');
   await clients[0].waitForFunction(() => !document.getElementById('diagnostics').hidden);
   const gpu = await sessions[0].page.evaluate(() => window.getGPUInfo());
   assert.equal(await clients[0].$eval('#gpuRenderer', element => element.textContent), gpu.renderer);
@@ -125,6 +130,8 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
     const warning = document.getElementById('performanceWarning').textContent;
     return warning.includes('Low FPS') && warning.includes('Slow render');
   });
+  await clients[0].click('#resume');
+  await clients[0].waitForFunction(() => document.pointerLockElement === video);
   await new Promise(resolve => setTimeout(resolve, 300));
   const beforeVertical = await sessions[0].page.evaluate(() => window.camera.position.toArray());
   await clients[0].keyboard.down('e');

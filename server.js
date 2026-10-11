@@ -33,17 +33,67 @@ async function start(options = {}) {
   }
   const iceServers = JSON.parse(process.env.ICE_SERVERS || '[]');
   const modelPath = options.modelPath ?? process.env.MODEL_PATH;
+  const publicDirectory = await fs.realpath(PUBLIC);
+  const modelDirectory = path.resolve(options.modelDirectory ?? process.env.MODEL_DIRECTORY ?? path.join(ROOT, 'model'));
+  const defaultModelId = 'default';
+  const catalog = new Map();
+  const catalogIds = new Map();
+  function contains(directory, target) {
+    const relative = path.relative(directory, target);
+    return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+  }
+  async function catalogDirectory() {
+    if (contains(PUBLIC, modelDirectory)) throw new Error('MODEL_DIRECTORY must be outside public');
+    // Check existing ancestors too: a missing directory below a public symlink is not private.
+    let ancestor = modelDirectory;
+    while (true) {
+      try {
+        if (contains(publicDirectory, await fs.realpath(ancestor))) {
+          throw new Error('MODEL_DIRECTORY must be outside public');
+        }
+        break;
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        const parent = path.dirname(ancestor);
+        if (parent === ancestor) throw error;
+        ancestor = parent;
+      }
+    }
+    try { return await fs.realpath(modelDirectory); }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  }
+  await catalogDirectory();
+  async function openModel(source, directory, expectedPath) {
+    const resolved = await fs.realpath(source);
+    if (contains(publicDirectory, resolved) || contains(PUBLIC, path.resolve(source)) ||
+        (directory && !contains(directory, resolved)) ||
+        (expectedPath && expectedPath !== resolved) ||
+        path.extname(source).toLowerCase() !== '.glb' || path.extname(resolved).toLowerCase() !== '.glb') {
+      throw new Error('Invalid private model');
+    }
+    const handle = await fs.open(resolved, 'r');
+    try {
+      const stat = await handle.stat();
+      const magic = Buffer.alloc(4);
+      if (!stat.isFile()) throw new Error('Invalid private model');
+      await handle.read(magic, 0, 4, 0);
+      const current = await fs.stat(resolved);
+      if (magic.toString('ascii') !== 'glTF' || await fs.realpath(source) !== resolved ||
+          await fs.realpath(resolved) !== resolved ||
+          current.dev !== stat.dev || current.ino !== stat.ino) throw new Error('Invalid private model');
+      return { handle, resolved, stat };
+    } catch (error) { await handle.close(); throw error; }
+  }
   let model;
   if (modelPath) {
     const resolved = await fs.realpath(path.resolve(modelPath));
-    const relative = path.relative(await fs.realpath(PUBLIC), resolved);
-    if (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) {
+    if (contains(publicDirectory, resolved)) {
       throw new Error('MODEL_PATH must be outside public');
     }
-    const handle = await fs.open(resolved, 'r');
-    const magic = Buffer.alloc(4);
-    try { await handle.read(magic, 0, 4, 0); } finally { await handle.close(); }
-    if (path.extname(resolved).toLowerCase() !== '.glb' || magic.toString('ascii') !== 'glTF') {
+    try {
+      const opened = await openModel(path.resolve(modelPath));
+      await opened.handle.close();
+    } catch {
       throw new Error('MODEL_PATH must be a self-contained GLB; convert IFC first');
     }
     model = resolved;
@@ -61,7 +111,7 @@ async function start(options = {}) {
   const modelServer = needsLoopbackServer ? http.createServer(app) : server;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16384 });
   const sessions = new Map();
-  const modelTokens = new Set();
+  const modelTokens = new Map();
   let origin;
   const assets = new Map([
     ['/index.html', [path.join(ROOT, 'renderer/index.html'), 'text/html']],
@@ -96,35 +146,128 @@ async function start(options = {}) {
     res.setHeader('Content-Security-Policy', "default-src 'self'; connect-src 'self'; media-src 'self' blob:; frame-ancestors 'none'");
     next();
   });
-  app.post('/session', rateLimit({ windowMs: 60000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false }),
-    express.json({ limit: '1kb' }), async (req, res) => {
+  function authenticate(req, res, next) {
     if (req.headers.origin !== origin) return res.sendStatus(403);
     if (password) {
       const supplied = Buffer.from(typeof req.body?.password === 'string' ? req.body.password : '');
       const expected = Buffer.from(password);
       if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return res.sendStatus(401);
     }
+    next();
+  }
+  const loginLimit = () => rateLimit({ windowMs: 60000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false });
+  app.post('/models', loginLimit(), express.json({ limit: '1kb' }), authenticate, async (req, res) => {
+    const models = [{ id: defaultModelId, name: model ? path.basename(modelPath) : 'Demo scene' }];
+    try {
+      const directory = await catalogDirectory();
+      if (!directory) return res.json({ defaultModelId, models, message: 'Model directory is missing; no private models available.' });
+      const entries = await fs.readdir(modelDirectory, { withFileTypes: true });
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        if ((!entry.isFile() && !entry.isSymbolicLink()) || path.extname(entry.name).toLowerCase() !== '.glb') continue;
+        const source = path.join(modelDirectory, entry.name);
+        try {
+          const opened = await openModel(source, directory);
+          await opened.handle.close();
+        } catch (error) {
+          if (error.code && !['ENOENT', 'ENOTDIR', 'ELOOP'].includes(error.code)) throw error;
+          continue;
+        }
+        let id = catalogIds.get(source);
+        if (!id) {
+          id = randomBytes(32).toString('hex');
+          catalogIds.set(source, id);
+          catalog.set(id, source);
+        }
+        models.push({ id, name: entry.name });
+      }
+      res.json({ defaultModelId, models, ...(models.length === 1 ? { message: 'No supported private GLB models available.' } : {}) });
+    } catch {
+      res.status(500).json({ error: 'Unable to discover private models. Check the model directory.' });
+    }
+  });
+  app.post('/session', loginLimit(), express.json({ limit: '1kb' }), authenticate, async (req, res) => {
+    const selectedId = req.body?.modelId;
+    let selectedPath = model;
+    let source = modelPath ? path.resolve(modelPath) : null;
+    const fromCatalog = selectedId !== undefined && selectedId !== defaultModelId;
+    if (fromCatalog && (typeof selectedId !== 'string' || !/^[a-f0-9]{64}$/.test(selectedId) || !catalog.has(selectedId))) {
+      return res.status(400).json({ error: 'Invalid model selection. Refresh the model list.' });
+    }
+    try {
+      let directory;
+      if (fromCatalog) {
+        directory = await catalogDirectory();
+        if (!directory) throw new Error('Missing model directory');
+        source = catalog.get(selectedId);
+      }
+      if (source) {
+        const opened = await openModel(source, directory);
+        selectedPath = opened.resolved;
+        await opened.handle.close();
+      }
+    } catch {
+      return res.status(400).json({ error: 'Selected model is unavailable. Refresh the model list.' });
+    }
     if (sessions.has(sessionId(req))) await remove(sessionId(req));
     if (sessions.size >= maxSessions) return res.status(503).json({ error: 'Viewer capacity reached' });
     const id = randomBytes(32).toString('hex');
-    const session = { page: null, ws: null, modelToken: model ? randomBytes(32).toString('hex') : null };
-    if (session.modelToken) modelTokens.add(session.modelToken);
+    const session = { page: null, ws: null, model: selectedPath, modelToken: selectedPath ? randomBytes(32).toString('hex') : null };
+    if (session.modelToken) modelTokens.set(session.modelToken, { path: selectedPath, source, fromCatalog });
     session.timer = setTimeout(() => void remove(id), SESSION_MS).unref();
     sessions.set(id, session);
     res.setHeader('Set-Cookie', `viewer=${id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600${origin.startsWith('https:') ? '; Secure' : ''}`);
     res.json({ iceServers });
   });
   // Private geometry travels over HTTP, never through the DevTools control channel.
-  app.get('/private-model', (req, res) => {
+  app.get('/private-model', async (req, res) => {
     const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
     const token = typeof req.query.token === 'string' ? req.query.token : '';
-    if (!model || !loopback || !modelTokens.has(token)) return res.sendStatus(404);
-    res.sendFile(model, { dotfiles: 'allow', headers: { 'Content-Type': 'model/gltf-binary' } });
+    const binding = modelTokens.get(token);
+    if (!loopback || !binding || req.originalUrl !== `/private-model?token=${token}`) return res.sendStatus(404);
+    let opened;
+    try {
+      const directory = binding.fromCatalog ? await catalogDirectory() : null;
+      if (binding.fromCatalog && !directory) throw new Error('Missing model directory');
+      opened = await openModel(binding.source, directory, binding.path);
+      if (modelTokens.get(token) !== binding) throw new Error('Revoked model token');
+    } catch {
+      await opened?.handle.close();
+      return res.sendStatus(404);
+    }
+    const { handle, stat } = opened;
+    let start = 0;
+    let end = stat.size - 1;
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Type', 'model/gltf-binary');
+    if (req.headers.range) {
+      const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+      if (range && (range[1] || range[2])) {
+        start = range[1] ? Number(range[1]) : Math.max(0, stat.size - Number(range[2]));
+        end = range[1] && range[2] ? Math.min(end, Number(range[2])) : end;
+      } else start = stat.size;
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= stat.size) {
+        await handle.close();
+        return res.status(416).set('Content-Range', `bytes */${stat.size}`).end();
+      }
+      res.status(206).set('Content-Range', `bytes ${start}-${end}/${stat.size}`);
+    }
+    res.setHeader('Content-Length', end - start + 1);
+    if (req.method === 'HEAD') { await handle.close(); return res.end(); }
+    // Stream the validated descriptor, not a pathname that could be replaced with a symlink.
+    const stream = handle.createReadStream({ start, end });
+    stream.on('error', () => res.destroy());
+    res.on('close', () => stream.destroy());
+    stream.pipe(res);
   });
   // Only these three client assets are public, even if a model is misplaced.
   for (const file of ['index.html', 'client.js', 'styles.css']) {
     app.get(file === 'index.html' ? '/' : `/${file}`, (req, res) => res.sendFile(path.join(PUBLIC, file)));
   }
+  app.use((error, req, res, next) => {
+    if (res.headersSent) return next(error);
+    res.status(error.status === 413 ? 413 : error.status === 400 ? 400 : 500)
+      .json({ error: error.status === 400 || error.status === 413 ? 'Invalid request body' : 'Request failed' });
+  });
   server.on('upgrade', (req, socket, head) => {
     const id = sessionId(req);
     const session = sessions.get(id);
@@ -226,7 +369,9 @@ async function start(options = {}) {
         void (async () => {
           const url = new URL(request.url());
           if (url.origin !== rendererOrigin) return request.abort();
-          if (url.pathname === '/private-model' && model) return request.continue();
+          if (url.pathname === '/private-model' && session.modelToken &&
+              request.url() === `${rendererOrigin}/private-model?token=${session.modelToken}` &&
+              modelTokens.has(session.modelToken)) return request.continue();
           const asset = assets.get(url.pathname);
           if (!asset) return request.abort();
           await request.respond({ status: 200, contentType: asset[1], body: await fs.readFile(asset[0]) });
@@ -266,7 +411,7 @@ async function start(options = {}) {
         }
       }, 33);
       await page.evaluate(config => window.startStream(config),
-        { iceServers, hasModel: !!model, modelToken: session.modelToken, gpu });
+        { iceServers, hasModel: !!session.model, modelToken: session.modelToken, gpu });
       send({ type: 'ready' });
     } catch (error) {
       console.error('Renderer session failed:', error.message);

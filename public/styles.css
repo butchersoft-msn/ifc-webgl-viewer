@@ -17,9 +17,24 @@ video {
   object-fit: contain;
 }
 
-input, button { display: block; margin-top: 8px; padding: 6px; }
+input, button, select { display: block; margin-top: 8px; padding: 6px; max-width: 100%; }
 input[type="checkbox"] { display: inline-block; }
-button:focus-visible, input:focus-visible { outline: 2px solid #ffcc00; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #ffcc00; }
+[hidden] { display: none !important; }
+#toolbar {
+  position: fixed;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  gap: 6px;
+  z-index: 101;
+}
+#toolbar button { margin: 0; width: 44px; height: 44px; color: white; background: #222d; border: 1px solid #aaa; border-radius: 6px; }
+#toolbar button[aria-pressed="true"] { color: #00ff00; border-color: #00ff00; }
+#toolbar svg { width: 26px; height: 26px; }
+.hud.viewing { background: transparent; border: 0; padding: 0; backdrop-filter: none; }
+.hud.viewing:has(#pausePanel:not([hidden]), #diagnostics:not([hidden])) { background: #000b; padding: 12px; }
+#modelStatus { margin-top: 8px; }
 #measurementStatus { margin-top: 8px; line-height: 1.6; }
 
 .hud {

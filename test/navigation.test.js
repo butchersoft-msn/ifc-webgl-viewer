@@ -124,8 +124,10 @@ test('client maps Q/E and Shift and normalizes/clears one-shot viewer wheel inpu
   const listeners = new Map();
   const target = name => ({
     hidden: false, clientHeight: 720,
+    classList: { add() {}, remove() {} },
     setAttribute() {}, focus() {},
     addEventListener: (event, fn) => listeners.set(`${name}:${event}`, fn),
+    removeEventListener() {},
   });
   const video = target('video');
   const form = target('login');
@@ -141,7 +143,7 @@ test('client maps Q/E and Shift and normalizes/clears one-shot viewer wheel inpu
     close() {}
   }
   const context = vm.createContext({ document, window: target('window'), WebSocket: { OPEN: 1 },
-    clearInterval() {}, URL, console });
+    clearInterval() {}, setTimeout() {}, clearTimeout() {}, AbortController, URL, console });
   vm.runInContext(await fs.readFile(require.resolve('../public/client.js'), 'utf8'), context);
   context.sent = sent;
   vm.runInContext('socket = { readyState: 1, send: value => sent.push(JSON.parse(value)), close() {} };', context);
@@ -153,7 +155,7 @@ test('client maps Q/E and Shift and normalizes/clears one-shot viewer wheel inpu
   assert.equal(wheel(-100), false, 'Inactive viewer leaves page scrolling alone');
   form.hidden = true;
   document.pointerLockElement = video;
-  vm.runInContext('paused = false', context);
+  vm.runInContext('paused = false; sessionState = "viewing"', context);
   assert.equal(wheel(-10), true);
   wheel(-2, 1);
   assert.equal(vm.runInContext('wheel', context), -42);
@@ -187,7 +189,7 @@ test('client maps Q/E and Shift and normalizes/clears one-shot viewer wheel inpu
   video.removeAttribute = () => {};
   await listeners.get('login:submit')({ preventDefault() {} });
   document.pointerLockElement = video;
-  vm.runInContext('paused = false', context);
+  vm.runInContext('paused = false; sessionState = "viewing"', context);
   for (const code of ['ShiftLeft', 'ArrowUp', 'KeyE']) {
     listeners.get('document:keydown')({ code, preventDefault() {} });
   }
