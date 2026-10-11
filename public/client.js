@@ -11,9 +11,74 @@ let wheel = 0;
 let interval;
 let generation = 0;
 let mediaUrl;
+const pausePanel = document.getElementById('pausePanel');
+const wireframe = document.getElementById('wireframe');
+const measureButton = document.getElementById('measure');
+const measurementStatus = document.getElementById('measurementStatus');
+let paused = true;
+let measuring = false;
+let lockRequested = false;
+let measurementRequest = 0;
+let picking = false;
+let rendererReady = false;
+
+function sendCommand(message) {
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+}
+function measurement(action, point = {}) {
+  picking = action === 'pick';
+  sendCommand({ type: 'measure', action, requestId: ++measurementRequest, ...point });
+}
+function pause() {
+  paused = true;
+  lockRequested = false;
+  clearInput();
+  sendCommand({ type: 'pause', paused: true });
+  pausePanel.hidden = !form.hidden;
+  if (document.pointerLockElement === video) document.exitPointerLock();
+}
+function resume() {
+  if (!form.hidden || !rendererReady || socket?.readyState !== WebSocket.OPEN) return;
+  if (measuring) measurement('cancel');
+  measuring = false;
+  measureButton.setAttribute('aria-pressed', 'false');
+  measurementStatus.textContent = '';
+  clearInput();
+  lockRequested = true;
+  void video.play().catch(() => {});
+  try {
+    video.requestPointerLock()?.catch(() => {
+      pause();
+      status.textContent = 'Mouse lock unavailable. Use Resume to try again.';
+    });
+  } catch {
+    pause();
+    status.textContent = 'Mouse lock unavailable. Use Resume to try again.';
+  }
+}
+
+// The video is styled object-fit: contain with centered content.
+function videoPoint(event) {
+  const rect = video.getBoundingClientRect();
+  if (!video.videoWidth || !video.videoHeight || !rect.width || !rect.height) return null;
+  const scale = Math.min(rect.width / video.videoWidth, rect.height / video.videoHeight);
+  const width = video.videoWidth * scale;
+  const height = video.videoHeight * scale;
+  const x = (event.clientX - rect.left - (rect.width - width) / 2) / width;
+  const y = (event.clientY - rect.top - (rect.height - height) / 2) / height;
+  return Number.isFinite(x) && Number.isFinite(y) && x >= 0 && x <= 1 && y >= 0 && y <= 1 ? { x, y } : null;
+}
 
 function disconnect() {
+  pause();
   generation++;
+  rendererReady = false;
+  measurementRequest++;
+  measuring = picking = false;
+  wireframe.checked = false;
+  measureButton.setAttribute('aria-pressed', 'false');
+  measurementStatus.textContent = '';
+  pausePanel.hidden = true;
   clearInterval(interval);
   keys.clear();
   mouseX = mouseY = wheel = 0;
@@ -41,6 +106,7 @@ form.addEventListener('submit', async event => {
     const config = await response.json();
     if (attempt !== generation) return;
     form.hidden = true;
+    pausePanel.hidden = false;
     peer = new RTCPeerConnection({ iceServers: config.iceServers });
     socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/signal`);
     const currentPeer = peer;
@@ -114,6 +180,18 @@ form.addEventListener('submit', async event => {
           }, { once: true });
           status.textContent = 'Video: WebSocket fallback';
           void video.play().catch(() => { status.textContent = 'Click video to play'; });
+        } else if (message.type === 'ready') {
+          rendererReady = true;
+          sendCommand({ type: 'pause', paused: true });
+          sendCommand({ type: 'wireframe', enabled: wireframe.checked });
+        } else if (message.type === 'measurement') {
+          if (!measuring || message.requestId !== measurementRequest) return;
+          picking = false;
+          measurementStatus.textContent = message.status === 'complete'
+            ? `Distance: ${message.distance.toPrecision(6)} model units. Click to start another measurement.`
+            : message.status === 'no-hit' ? 'No model surface here. Try another point.'
+            : message.status === 'second' ? 'Click the second model surface point.'
+            : 'Click the first model surface point.';
         } else if (message.type === 'stats') {
           diagnostics.hidden = false;
           document.getElementById('fps').textContent = message.fps.toFixed(1);
@@ -136,6 +214,7 @@ form.addEventListener('submit', async event => {
     };
     currentSocket.onerror = () => { status.textContent = 'Signaling connection failed'; };
     interval = setInterval(() => {
+      if (paused || measuring || document.pointerLockElement !== video) return;
       const shift = keys.has('ShiftLeft') || keys.has('ShiftRight');
       send({
         type: 'input', forward: keys.has('ArrowUp') || keys.has('KeyW'),
@@ -153,7 +232,9 @@ form.addEventListener('submit', async event => {
 });
 const navigationKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight'];
 document.addEventListener('keydown', event => {
-  if (form.hidden && navigationKeys.includes(event.code)) { event.preventDefault(); keys.add(event.code); }
+  if (form.hidden && event.code === 'Escape') { pause(); return; }
+  if (form.hidden && !paused && !measuring && document.pointerLockElement === video &&
+      !event.repeat && navigationKeys.includes(event.code)) { event.preventDefault(); keys.add(event.code); }
 });
 document.addEventListener('keyup', event => keys.delete(event.code));
 function clearInput() {
@@ -161,9 +242,9 @@ function clearInput() {
   mouseX = mouseY = wheel = 0;
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'input', reset: true }));
 }
-window.addEventListener('blur', clearInput);
+window.addEventListener('blur', pause);
 video.addEventListener('wheel', event => {
-  if (form.hidden) {
+  if (form.hidden && !paused && !measuring && document.pointerLockElement === video) {
     if (socket?.readyState !== WebSocket.OPEN) return;
     event.preventDefault();
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? video.clientHeight || 720 : 1;
@@ -171,15 +252,57 @@ video.addEventListener('wheel', event => {
     wheel = Math.max(-500, Math.min(500, wheel + delta));
   }
 }, { passive: false });
-video.addEventListener('click', () => {
+video.addEventListener('click', event => {
   void video.play().catch(() => {});
-  if (form.hidden) video.requestPointerLock()?.catch(() => { status.textContent = 'Mouse lock unavailable'; });
+  if (measuring) {
+    if (picking) return;
+    const point = videoPoint(event);
+    if (point) measurement('pick', point);
+    else measurementStatus.textContent = 'Click inside the video image.';
+  } else if (form.hidden && paused) resume();
 });
 document.addEventListener('mousemove', event => {
-  if (document.pointerLockElement === video) {
+  if (!paused && !measuring && document.pointerLockElement === video) {
     mouseX += event.movementX;
     mouseY += event.movementY;
   }
 });
-document.addEventListener('pointerlockchange', clearInput);
+document.addEventListener('pointerlockchange', () => {
+  clearInput();
+  if (document.pointerLockElement === video && lockRequested && !measuring && form.hidden) {
+    lockRequested = false;
+    paused = false;
+    pausePanel.hidden = true;
+    sendCommand({ type: 'pause', paused: false });
+  } else {
+    pause();
+    if (form.hidden) document.getElementById('resume').focus();
+  }
+});
+document.addEventListener('pointerlockerror', () => {
+  pause();
+  status.textContent = 'Mouse lock unavailable. Use Resume to try again.';
+});
+wireframe.addEventListener('change', () => sendCommand({ type: 'wireframe', enabled: wireframe.checked }));
+measureButton.addEventListener('click', () => {
+  if (!rendererReady) { measurementStatus.textContent = 'Wait for the model to finish loading.'; return; }
+  pause();
+  measuring = true;
+  measureButton.setAttribute('aria-pressed', 'true');
+  measurementStatus.textContent = 'Click the first model surface point.';
+  measurement('start');
+});
+document.getElementById('clearMeasurement').addEventListener('click', () => {
+  if (measuring) {
+    measurement('clear');
+    measurementStatus.textContent = 'Click the first model surface point.';
+  }
+});
+document.getElementById('cancelMeasurement').addEventListener('click', () => {
+  measurement('cancel');
+  measuring = false;
+  measureButton.setAttribute('aria-pressed', 'false');
+  measurementStatus.textContent = '';
+});
+document.getElementById('resume').addEventListener('click', resume);
 window.addEventListener('pagehide', disconnect);

@@ -103,6 +103,8 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
   } }));
   const positions = await Promise.all(sessions.map(session => session.page.evaluate(() => window.camera.position.toArray())));
   assert.deepEqual(positions[0], positions[1]);
+  await clients[0].click('#resume');
+  await clients[0].waitForFunction(() => document.pointerLockElement === video);
   await clients[0].keyboard.down('ArrowUp');
   await new Promise(resolve => setTimeout(resolve, 600));
   await clients[0].keyboard.up('ArrowUp');
@@ -194,6 +196,8 @@ test('input batching stays bounded during a stalled RPC and cleans up on close',
     });
   });
   await diagnosticsReady;
+  socket.send(JSON.stringify({ type: 'pause', paused: false }));
+  await session.page.waitForFunction(() => window.inputEpoch === 1);
   const evaluate = session.page.evaluate.bind(session.page);
   const calls = [];
   let release;
@@ -242,7 +246,36 @@ test('input batching stays bounded during a stalled RPC and cleans up on close',
   assert.ok(Number.isFinite(stats.inputLatency) && stats.inputLatency >= 0);
   assert.deepEqual(stats.gpu, await evaluate(() => window.getGPUInfo()));
   assert.ok(messages.some(message => message.type === 'stats' && message.inputLatency === null));
-  socket.close();
+  const beforePause = await evaluate(() => window.camera.position.toArray());
+  let releaseLate;
+  const late = new Promise(resolve => { releaseLate = resolve; });
+  let lateStarted;
+  const lateReady = new Promise(resolve => { lateStarted = resolve; });
+  session.page.evaluate = async (fn, ...args) => {
+    if (fn.toString().includes('window.setInput')) { lateStarted(); await late; }
+    return evaluate(fn, ...args);
+  };
+  t.after(() => releaseLate());
+  socket.send(JSON.stringify({ type: 'input', forward: true, wheel: -100 }));
+  await lateReady;
+  socket.send(JSON.stringify({ type: 'input', forward: true, wheel: -100 }));
+  socket.send(JSON.stringify({ type: 'pause', paused: true }));
+  await session.page.waitForFunction(() => window.inputEpoch === 2);
+  socket.send(JSON.stringify({ type: 'input', forward: true, wheel: -100 }));
+  releaseLate();
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.deepEqual(await evaluate(() => window.camera.position.toArray()), beforePause,
+    'Pause drops queued movement and rejects late in-flight input');
+  session.page.evaluate = evaluate;
+  socket.send(JSON.stringify({ type: 'measure', action: 'start', requestId: 1 }));
+  socket.send(JSON.stringify({ type: 'measure', action: 'pick', requestId: 2, x: 0.5, y: 0.5 }));
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.ok(messages.some(message => message.type === 'measurement' && message.requestId === 2 && message.status === 'second'));
+  socket.send(JSON.stringify({ type: 'measure', action: 'clear', requestId: 3 }));
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.ok(messages.some(message => message.type === 'measurement' && message.requestId === 3 && message.status === 'first'));
+  socket.send(JSON.stringify({ type: 'measure', action: 'pick', requestId: 4, x: 2, y: 0.5 }));
+  await new Promise(resolve => socket.once('close', (code) => { assert.equal(code, 1008); resolve(); }));
   await new Promise(resolve => setTimeout(resolve, 150));
   assert.equal(viewer.sessions.size, 0);
   assert.ok(session.syncInterval._destroyed);

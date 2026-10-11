@@ -67,6 +67,7 @@ async function start(options = {}) {
     ['/index.html', [path.join(ROOT, 'renderer/index.html'), 'text/html']],
     ['/renderer.js', [path.join(ROOT, 'renderer/renderer.js'), 'text/javascript']],
     ['/navigation.mjs', [path.join(ROOT, 'renderer/navigation.mjs'), 'text/javascript']],
+    ['/viewer-tools.mjs', [path.join(ROOT, 'renderer/viewer-tools.mjs'), 'text/javascript']],
     ['/three.js', [path.join(ROOT, 'node_modules/three/build/three.module.js'), 'text/javascript']],
     ['/three.core.js', [path.join(ROOT, 'node_modules/three/build/three.core.js'), 'text/javascript']],
     ['/GLTFLoader.js', [path.join(ROOT, 'node_modules/three/examples/jsm/loaders/GLTFLoader.js'), 'text/javascript']],
@@ -144,6 +145,9 @@ async function start(options = {}) {
     let count = 0;
     let pendingInput = null;
     let inputSyncing = false;
+    let paused = true;
+    let inputEpoch = 0;
+    let queuedCommands = 0;
     session.rateTimer = setInterval(() => { count = 0; }, 1000);
     const send = message => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
@@ -156,7 +160,9 @@ async function start(options = {}) {
       let message;
       try {
         message = JSON.parse(data.toString());
+        if (!message || typeof message !== 'object' || Array.isArray(message)) throw new Error('Invalid command');
         if (message.type === 'input') {
+          if (paused) return;
           const delta = value => Number.isFinite(value) ? Math.max(-500, Math.min(500, value)) : 0;
           if (message.reset === true) pendingInput = null;
           pendingInput = {
@@ -170,18 +176,45 @@ async function start(options = {}) {
           };
           return;
         }
+        if (message.type === 'pause') {
+          if (typeof message.paused !== 'boolean') throw new Error('Invalid pause');
+          paused = message.paused;
+          pendingInput = null;
+          message = { type: 'pause', paused, epoch: ++inputEpoch };
+        } else if (message.type === 'wireframe') {
+          if (typeof message.enabled !== 'boolean') throw new Error('Invalid wireframe');
+          message = { type: 'wireframe', enabled: message.enabled };
+        } else if (message.type === 'measure') {
+          if (!['start', 'clear', 'cancel', 'pick'].includes(message.action) ||
+              !Number.isSafeInteger(message.requestId) || message.requestId < 0 ||
+              (message.action === 'pick' && (!Number.isFinite(message.x) || !Number.isFinite(message.y) ||
+                message.x < 0 || message.x > 1 || message.y < 0 || message.y > 1)) || !paused) {
+            throw new Error('Invalid measurement');
+          }
+          message = { type: 'measure', action: message.action, requestId: message.requestId,
+            ...(message.action === 'pick' ? { x: message.x, y: message.y } : {}) };
+        } else if (!['answer', 'ice'].includes(message.type)) throw new Error('Invalid command');
       } catch {
         ws.close(1008, 'Invalid signaling message');
         return;
       }
+      if (++queuedCommands > 32) return ws.close(1008, 'Command queue exceeded');
       chain = chain.then(async () => {
         if (!ready) return;
         if (message.type === 'answer' && typeof message.sdp === 'string' && message.sdp.length < 12000) {
           await session.page.evaluate(sdp => window.acceptAnswer(sdp), message.sdp);
         } else if (message.type === 'ice' && message.candidate && typeof message.candidate.candidate === 'string') {
           await session.page.evaluate(candidate => window.acceptIce(candidate), message.candidate);
+        } else if (['pause', 'wireframe', 'measure'].includes(message.type)) {
+          const result = await session.page.evaluate(command => {
+            if (command.type === 'pause') window.inputEpoch = command.epoch;
+            return window.viewerCommand(command);
+          }, message);
+          if (result) send(result);
+        } else {
+          throw new Error('Invalid signaling message');
         }
-      }).catch(() => ws.close(1008, 'Invalid signaling message'));
+      }).catch(() => ws.close(1008, 'Invalid signaling message')).finally(() => { queuedCommands--; });
     });
     try {
       const page = await browser.newPage();
@@ -218,10 +251,13 @@ async function start(options = {}) {
       session.syncInterval = setInterval(async () => {
         if (!ready || inputSyncing || !pendingInput) return;
         const input = pendingInput;
+        const epoch = inputEpoch;
         pendingInput = null;
         inputSyncing = true;
         try {
-          await page.evaluate(input => window.setInput(input), input);
+          await page.evaluate((input, epoch) => {
+            if (epoch === (window.inputEpoch || 0)) window.setInput(input);
+          }, input, epoch);
         } catch {
           ws.close(1011, 'Input sync failed');
           await remove(id);
@@ -231,6 +267,7 @@ async function start(options = {}) {
       }, 33);
       await page.evaluate(config => window.startStream(config),
         { iceServers, hasModel: !!model, modelToken: session.modelToken, gpu });
+      send({ type: 'ready' });
     } catch (error) {
       console.error('Renderer session failed:', error.message);
       send({ type: 'error', message: 'Renderer failed. Check the server log.' });

@@ -19,11 +19,19 @@ npm install
 npm start
 ```
 
-Open **http://127.0.0.1:3000**. With no `MODEL_PATH`, the viewer renders a demo scene. Use WASD or arrow keys to move; click the video for mouse look, and press Escape to release pointer lock.
+Open **http://127.0.0.1:3000**. With no `MODEL_PATH`, the viewer renders a demo scene. Click **Resume navigation** (or the video) to enable mouse look and WASD/arrow movement. Escape releases pointer lock, stops navigation, and opens the options panel. Blur and lost pointer lock also pause; held keys do not restart movement until released and pressed again.
 
 Models and the demo cube start in a closer, perspective-aware view that fits their full bounds with a small margin. Navigation speed scales with model size. Hold Shift while moving with arrows or WASD (or vertically) to smoothly ramp from normal speed to an 8× cap over 3.5 seconds; releasing Shift or stopping resets the boost. Q moves down and E moves up, replacing the old Shift+arrow vertical controls.
 
-Scroll up over the video to approach and down to retreat along the viewing direction, including while mouse look is active; pointer lock is not required. Mouse wheels and trackpads are supported, with bounded sensitivity and Shift boost. Input is batched every 33 ms with at most one input RPC in flight; keyboard state is replaced by the latest state and mouse/wheel deltas are accumulated within bounded limits and consumed once. Blur, lost mouse lock, disconnect, and new sessions clear navigation state; stale input stops movement and resets acceleration after 250 ms.
+Scroll up over the video to approach and down to retreat along the viewing direction while navigation is active. Mouse wheels and trackpads are supported, with bounded sensitivity and Shift boost. Input is batched every 33 ms with at most one input RPC in flight; keyboard state is replaced by the latest state and mouse/wheel deltas are accumulated within bounded limits and consumed once. Pause discards pending movement and invalidates late input RPCs. Blur, lost mouse lock, disconnect, and new sessions clear navigation state; stale input stops movement and resets acceleration after 250 ms.
+
+### Paused-viewer options
+
+- **Wireframe model** toggles only model mesh materials, including the demo cube; disabling restores the original solid appearance. Grids and measurement helpers are unchanged.
+- **Measure distance** keeps navigation paused. Click two visible model surfaces in the video (not its letterbox bars). Instructions, no-hit feedback, streamed endpoint markers/segment, and a distance readout guide the selection. Click again after completion for another measurement, **Clear / start again** to reset, or **Cancel measurement** to remove it.
+- **Resume navigation** exits measurement and requests pointer lock using your explicit gesture. If locking fails, navigation remains paused and you can retry.
+
+Distances are Euclidean distances between server-raycast **world-space** surface points, including model transforms/scales, labeled **model units**. The converter applies IFC placement transforms, but the viewer accepts arbitrary self-contained GLBs and does not verify their physical units; it does not guarantee meters. Picks send only normalized image coordinates; geometry, scene assets, and model tokens remain private. Wireframe and measurement state belong to each session.
 
 The HUD updates every 0.5 seconds with server-rendered FPS, average CPU render-call time, time since the renderer's last input update, and WebGL GPU vendor/model. Warnings appear below 20 FPS or above 40 ms average render time. Input update age is not end-to-end network/video latency, and CPU render time is not GPU execution time or utilization. A SwiftShader/software model name indicates software rendering; a hardware model name does not guarantee hardware video encoding. These diagnostics help identify slow rendering but cannot by themselves separate every CPU, GPU, encoding, or network bottleneck.
 
@@ -64,6 +72,8 @@ For external access, use an HTTPS reverse proxy with WebSocket upgrade support a
 A public/non-loopback `APP_ORIGIN` requires HTTPS and `VIEWER_PASSWORD`, even when backend `HOST` is loopback. Express rate limits all HTTP requests to 120/minute/IP and `POST /session` to 10/minute/IP. Behind a reverse proxy, the default limiter sees the proxy IP, so users share its quota. Do not blindly change `trust proxy`; proxy trust and rate limiting need production review.
 
 ## Limits and verification
+
+Manual checks for **both WebRTC and WebSocket WebM fallback**: confirm decoded video and diagnostics; hold W/Shift, press Escape, and verify movement stops even while continuing to hold/repeat keys. Tab through the options, toggle wireframe on/off, select two surfaces, miss the model, reset/cancel and repeat. Resize to a letterboxed viewport and verify bars cannot select points. Confirm markers/readout and independent sessions, blur/reconnect reset, and Resume/pointer-lock failure behavior. Fallback video can lag the server scene; wait for the paused view to settle before selecting points. For fallback, block WebRTC connectivity and wait for the automatic five-second switch.
 
 Each viewer incurs server rendering, encoding, memory, and bandwidth costs. GPU acceleration is environment-dependent; no NVIDIA/NVENC encoding, hardware capacity, latency, or frame-rate guarantee is made. SwiftShader is a software fallback, not GPU acceleration. Keep Chromium's sandbox enabled.
 
