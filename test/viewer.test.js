@@ -125,19 +125,32 @@ test('private IFC conversion and independent video-only sessions', { timeout: 12
   });
   await new Promise(resolve => setTimeout(resolve, 300));
   const beforeVertical = await sessions[0].page.evaluate(() => window.camera.position.toArray());
-  await clients[0].keyboard.down('Shift');
-  await clients[0].keyboard.down('ArrowUp');
+  await clients[0].keyboard.down('e');
   await new Promise(resolve => setTimeout(resolve, 600));
-  await clients[0].keyboard.up('ArrowUp');
+  await clients[0].keyboard.up('e');
   const above = await sessions[0].page.evaluate(() => window.camera.position.toArray());
   assert.ok(above[1] > beforeVertical[1]);
   assert.equal(above[0], beforeVertical[0]);
   assert.equal(above[2], beforeVertical[2]);
-  await clients[0].keyboard.down('ArrowDown');
+  await clients[0].keyboard.down('q');
   await new Promise(resolve => setTimeout(resolve, 600));
-  await clients[0].keyboard.up('ArrowDown');
-  await clients[0].keyboard.up('Shift');
+  await clients[0].keyboard.up('q');
   assert.ok((await sessions[0].page.evaluate(() => window.camera.position.y)) < above[1]);
+  await clients[0].keyboard.down('Shift');
+  await clients[0].keyboard.down('ArrowUp');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  await clients[0].keyboard.up('ArrowUp');
+  await clients[0].keyboard.up('Shift');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const beforeWheel = await sessions[0].page.evaluate(() => window.camera.position.toArray());
+  await clients[0].evaluate(() => video.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, cancelable: true })));
+  await sessions[0].page.waitForFunction(before => window.camera.position.z < before[2], {}, beforeWheel);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const afterWheel = await sessions[0].page.evaluate(() => window.camera.position.toArray());
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.deepEqual(await sessions[0].page.evaluate(() => window.camera.position.toArray()), afterWheel);
+  assert.equal(afterWheel[1], beforeWheel[1]);
+  assert.deepEqual(await sessions[1].page.evaluate(() => window.camera.position.toArray()), positions[1]);
   await sessions[0].page.evaluate(() => window.setInput({ x: 80, y: 30 }));
   assert.notEqual(await sessions[0].page.evaluate(() => window.camera.rotation.y), await sessions[1].page.evaluate(() => window.camera.rotation.y));
   await clients[0].close();
@@ -198,19 +211,30 @@ test('input batching stays bounded during a stalled RPC and cleans up on close',
   socket.send(JSON.stringify({ type: 'input', forward: true, x: 2, y: 3 }));
   await started;
   for (let i = 0; i < 10; i++) {
-    socket.send(JSON.stringify({ type: 'input', up: true, x: 1, y: -1 }));
+    socket.send(JSON.stringify({ type: 'input', up: true, x: 1, y: -1, wheel: -2 }));
   }
-  socket.send(JSON.stringify({ type: 'input', down: true, x: 4, y: 2 }));
+  socket.send(JSON.stringify({ type: 'input', down: true, boost: true, x: 4, y: 2, wheel: -3 }));
   await new Promise(resolve => setTimeout(resolve, 150));
   assert.equal(calls.length, 1, 'No concurrent input RPCs while renderer is stalled');
   release();
   await new Promise(resolve => setTimeout(resolve, 150));
   assert.equal(calls.length, 2, 'Only the latest pending state is sent');
   assert.deepEqual(calls[1], {
-    forward: false, backward: false, left: false, right: false, up: false, down: true, x: 14, y: -8,
+    forward: false, backward: false, left: false, right: false, up: false, down: true,
+    boost: true, reset: false, x: 14, y: -8, wheel: -23,
   });
+  socket.send(JSON.stringify({ type: 'input', boost: 'true', wheel: 1e300, x: 'bad', y: null }));
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.equal(calls[2].boost, false);
+  assert.equal(calls[2].wheel, 500);
+  assert.equal(calls[2].x, 0);
+  assert.equal(calls[2].y, 0);
+  socket.send(JSON.stringify({ type: 'input', wheel: 'bad', reset: true }));
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.equal(calls[3].wheel, 0);
+  assert.equal(calls[3].reset, true);
   await new Promise(resolve => setTimeout(resolve, 600));
-  assert.equal(calls.length, 2, 'Mouse deltas are not replayed without fresh input');
+  assert.equal(calls.length, 4, 'Mouse/wheel deltas are not replayed without fresh input');
   const stats = messages.find(message => message.type === 'stats' && message.inputLatency !== null);
   assert.ok(stats);
   assert.ok(Number.isFinite(stats.fps) && stats.fps > 0);
